@@ -126,7 +126,9 @@ Full guide: **[docs/self-hosting.md](docs/self-hosting.md)**. In short:
 2. **systemd**: [deploy/systemd/decibel.service](deploy/systemd/decibel.service) runs Decibel as an unprivileged
    `decibel` user with `ProtectSystem=strict` and data in `/var/lib/decibel`. `npm run package:server` builds a
    self-contained package and [deploy/systemd/install.sh](deploy/systemd/install.sh) installs it, backing up the
-   data first and rolling back if the health check fails.
+   data first and rolling back if the health check fails. Node, the app and the yt-dlp runtime
+   (`/opt/decibel-runtime`) are root-owned and read-only for the service; see
+   [docs/self-hosting.md](docs/self-hosting.md#2-systemd-service-with-an-unprivileged-user).
 3. **HTTPS in front**: a reverse proxy (Caddy, nginx, Traefik) or a **Cloudflare Tunnel** pointing to
    `http://127.0.0.1:3000`, e.g. `decibel.example.com`. Never expose the Node port directly.
 4. **`DECIBEL_TRUST_PROXY=loopback`** when the proxy/tunnel runs on the same machine (or the proxy's IP). Without it,

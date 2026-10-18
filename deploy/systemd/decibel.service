@@ -17,8 +17,9 @@ Environment=MUSIC_DATA_DIR=/var/lib/decibel/music
 Environment=HOME=/var/lib/decibel
 Environment=XDG_CACHE_HOME=/var/lib/decibel/cache
 Environment=PYTHONDONTWRITEBYTECODE=1
-Environment=YTDLP_BIN=/var/lib/decibel/tools/ytmusic/bin/yt-dlp
-Environment=YTMUSIC_PYTHON=/var/lib/decibel/tools/ytmusic/bin/python
+# Runtime tools live in a root-owned tree the service can run but not modify.
+Environment=YTDLP_BIN=/opt/decibel-runtime/ytmusic/bin/yt-dlp
+Environment=YTMUSIC_PYTHON=/opt/decibel-runtime/ytmusic/bin/python
 Environment=YTDLP_CACHE_DIR=/var/lib/decibel/cache/yt-dlp
 Environment=YTDLP_ALLOWED_ORIGINS=tauri://localhost,http://tauri.localhost,https://tauri.localhost
 ExecStart=/usr/local/bin/node /opt/decibel/server/index.mjs
@@ -31,6 +32,7 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 ReadWritePaths=/var/lib/decibel
+ReadOnlyPaths=/opt/decibel-runtime /opt/decibel
 
 [Install]
 WantedBy=multi-user.target

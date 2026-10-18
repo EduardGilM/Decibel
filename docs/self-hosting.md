@@ -38,6 +38,32 @@ Open `/admin` and create the other profiles. See [profiles.md](profiles.md).
   before replacing the application, and rolls back if the health check fails.
 - `check-health.mjs`: availability check (health endpoints, authentication required, CORS, download blocking).
 
+Filesystem layout created by `install.sh`. Everything that runs as root or that the service executes lives in
+root-owned trees the `decibel` user can read and run but not modify; only its state directory is writable:
+
+| Path | Owner / mode | Contents |
+| --- | --- | --- |
+| `/opt/decibel` | `root:root`, read-only | Application (static web app and Node server). |
+| `/opt/node-v22.23.3-linux-x64` | `root:root`, `0755` | Bundled Node.js, linked from `/usr/local/bin/node`. |
+| `/opt/decibel-runtime` | `root:root`, `0755` | Python runtime (ytmusicapi + yt-dlp), one `ytmusic-<lock hash>` per requirements lock; `ytmusic` points to the active one. |
+| `/var/lib/decibel` | `decibel:decibel`, `0750` | Database, `music/` and `cache/`. Never executed or followed by the installer as root. |
+| `/var/backups/decibel` | `root:root`, `0700` | One backup per installation (database, library and previous unit). |
+
+Before reusing an existing Node or Python runtime, the installer checks that the directory and all its parents
+are root-owned and that nothing inside belongs to another user or is writable by group/others; otherwise it
+recreates it. It refuses to continue if a state directory is a symbolic link. Tool checks during installation
+run as the `decibel` user.
+
+### Migrating from an older installer
+
+Older versions of `install.sh` kept the Python runtime in `/var/lib/decibel/tools` (writable by the service
+user, but executed by root during installation) and left Node with the archive's file owner. Running the new
+`install.sh` migrates automatically: it re-extracts Node as root if needed, builds the runtime in
+`/opt/decibel-runtime`, installs the updated unit (`YTDLP_BIN` and `YTMUSIC_PYTHON` point to
+`/opt/decibel-runtime/ytmusic/bin/`) and, once the health check passes, deletes `/var/lib/decibel/tools`. If you
+maintain your own unit, update those two variables. Backups made by older versions in `/var/lib/decibel/backups`
+are left in place; move them to a root-only location (for example `/var/backups/decibel`) or delete them.
+
 Review the paths before using it. The packager accepts `--output`, `--node-archive` (official
 `node-v22.23.3-linux-x64.tar.xz`, verified by SHA-256), `--python` and `--skip-build`. The bundled Python wheels
 target Python 3.13 (Debian 13); with a different Python, install directly as in step 1.
@@ -117,7 +143,7 @@ README: [Building the Android APK](../README.md#building-the-android-apk).
 ## Backups
 
 Only `DECIBEL_DB` and `MUSIC_DATA_DIR` are needed. Back up the database while running with SQLite's online
-backup API (as `install.sh` does) or with the service stopped, for example:
+backup API (as `install.sh` does, into `/var/backups/decibel`) or with the service stopped, for example:
 
 ```sh
 sqlite3 /var/lib/decibel/decibel.db ".backup '/var/backups/decibel-$(date +%F).db'"
