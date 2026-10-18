@@ -1,0 +1,207 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --radius: 0.625rem;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+}
+
+.dark {
+  /* Near-black Spotify-like greys: #121212 base, #181818 panels, #1f1f1f popovers, #282828 controls. Accents come from src/lib/themes.ts. */
+  --background: oklch(0.182 0 0);
+  --foreground: oklch(0.97 0 0);
+  --card: oklch(0.212 0 0);
+  --card-foreground: oklch(0.97 0 0);
+  --popover: oklch(0.24 0 0);
+  --popover-foreground: oklch(0.97 0 0);
+  --primary: oklch(0.76 0.17 152);
+  --primary-foreground: oklch(0.16 0.02 152);
+  --secondary: oklch(0.272 0 0);
+  --secondary-foreground: oklch(0.97 0 0);
+  --muted: oklch(0.258 0 0);
+  --muted-foreground: oklch(0.74 0 0);
+  --accent: oklch(0.29 0 0);
+  --accent-foreground: oklch(0.97 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 8%);
+  --input: oklch(1 0 0 / 12%);
+  --ring: oklch(0.76 0.17 152);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --sidebar: oklch(0.212 0 0);
+  --sidebar-foreground: oklch(0.97 0 0);
+  --sidebar-primary: oklch(0.76 0.17 152);
+  --sidebar-primary-foreground: oklch(0.16 0.02 152);
+  --sidebar-accent: oklch(0.272 0 0);
+  --sidebar-accent-foreground: oklch(0.97 0 0);
+  --sidebar-border: oklch(1 0 0 / 8%);
+  --sidebar-ring: oklch(0.76 0.17 152);
+}
+
+@property --scroll-blur {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --scroll-fade {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  button:not(:disabled), [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+    overscroll-behavior: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  /* Full-screen player: what scrolls up under the header fades to transparent over ~52px (no hard cut). */
+  .scroll-fade-top > [data-slot="scroll-area-viewport"] {
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--scroll-fade));
+    mask-image: linear-gradient(to bottom, transparent 0, #000 var(--scroll-fade));
+    transition: --scroll-fade 220ms ease-out;
+  }
+  .scroll-fade-top[data-scrolled="true"] > [data-slot="scroll-area-viewport"] {
+    --scroll-fade: 52px;
+  }
+  .scroll-blur-host {
+    transition: --scroll-blur 220ms ease-out;
+  }
+  .scroll-blur-host:has(> .scroll-fade-top[data-scrolled="true"]) {
+    --scroll-blur: 52px;
+  }
+  /* Text fields always match :focus-visible while typing: no green outline there, only Input's subtle border. */
+  input:focus-visible,
+  textarea:focus-visible {
+    outline: none;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      transition-duration: 0ms !important;
+      animation-duration: 0ms !important;
+    }
+  }
+}
+
+/* Frosted playback surfaces. The cover colour is a separate overlay (PLAYER_TINT). */
+/* Top safe area. Android's WebView does not report the status bar through env(), so MainActivity
+   lets the page draw behind it and injects its height as --android-inset-top (CSS px). */
+:root {
+  --safe-top: max(env(safe-area-inset-top), var(--android-inset-top, 0px));
+}
+
+@utility glass-player {
+  --muted-foreground: oklch(0.86 0 0);
+  background-color: color-mix(in oklab, var(--card) 62%, transparent);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  backdrop-filter: blur(24px) saturate(140%);
+}
+
+/* Wrapped: story segment filling up (paused with animation-play-state while held). */
+@keyframes wrapped-progress {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}

@@ -1,0 +1,121 @@
+import { createServer } from "node:http"
+import { access } from "node:fs/promises"
+import { dirname, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
+import handler from "serve-handler"
+import { createMusicService, createYtDlpRunner, MusicError } from "./ytdlp.mjs"
+import { createYtMusicRunner } from "./ytmusic.mjs"
+import { ARTWORK_MAX_AGE, createArtworkService } from "./artwork.mjs"
+import { openDb } from "./db.mjs"
+import { createProfileApi } from "./profile-api.mjs"
+import { createPodcastService } from "./podcasts.mjs"
+import { handlePodcastApi } from "./podcast-api.mjs"
+import { parsePodcastFeed } from "./podcast-feed.mjs"
+import { createRequestSecurity } from "./request-security.mjs"
+
+export async function createApp({ music, publicDir, allowedOrigins = [], artwork = createArtworkService(), profiles, podcasts = profiles ? createPodcastService({ db: profiles.db }) : undefined, trustProxy, now = Date.now }) {
+  const security = createRequestSecurity({ trustProxy })
+  let healthCache
+  const musicHealth = () => {
+    if (healthCache?.expires > now()) return healthCache.promise
+    const entry = { expires: Infinity }
+    entry.promise = Promise.resolve().then(() => music.health()).then(
+      (result) => { entry.expires = now() + 30_000; return result },
+      (error) => { entry.expires = now() + 5000; throw error },
+    )
+    healthCache = entry
+    return entry.promise
+  }
+  return createServer(async (req, res) => {
+    try {
+      const url = new URL(req.url, "http://localhost")
+      if (!url.pathname.startsWith("/api/")) {
+        if (!publicDir) throw new MusicError("Ruta no encontrada.", 404)
+        return await handler(req, res, { public: publicDir, directoryListing: false })
+      }
+      res.setHeader("Cache-Control", "no-store")
+      res.setHeader("Vary", "Origin")
+      const origin = req.headers.origin
+      if (origin) {
+        if (!security.sameOrigin(req, origin) && !allowedOrigins.includes(origin)) throw new MusicError("Origen no permitido.", 403)
+        res.setHeader("Access-Control-Allow-Origin", origin)
+        res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS")
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Range, If-Range, X-Decibel-Purpose")
+        res.setHeader("Access-Control-Expose-Headers", "Accept-Ranges, Content-Range, Content-Length, ETag, Last-Modified")
+        res.setHeader("Access-Control-Allow-Credentials", "true")
+      }
+      if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return }
+      const json = (value, status = 200) => { res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" }); res.end(JSON.stringify(value)) }
+      let user
+      if (profiles) {
+        // Profiles: every /api route needs a session except login and health.
+        if (await profiles.handle(req, res, url, json)) return
+        user = profiles.guard(req, res, url.pathname)
+      }
+      if (await handlePodcastApi(req, res, url, json, user, podcasts)) return
+      if (!url.pathname.startsWith("/api/music/")) throw new MusicError("Ruta no encontrada.", 404)
+      // YouTube audio is streamed only; offline copies are refused here as well as in the client.
+      if (req.headers["x-decibel-purpose"] === "download") throw new MusicError("Las descargas sin conexión no están disponibles para YouTube.", 403)
+      const route = url.pathname.slice("/api/music/".length)
+      const body = async () => {
+        if (!req.headers["content-type"]?.startsWith("application/json")) throw new MusicError("Se requiere JSON.", 415)
+        let contents = ""
+        for await (const chunk of req) { contents += chunk; if (contents.length > 4096) throw new MusicError("Petición demasiado grande.", 413) }
+        try { return JSON.parse(contents) } catch { throw new MusicError("JSON no válido.") }
+      }
+      if (req.method === "GET") {
+        switch (route) {
+          case "artwork": {
+            const image = await artwork.get(url.searchParams.get("url"))
+            res.writeHead(200, { "Content-Type": image.contentType, "Content-Length": image.body.length, "Cache-Control": `public, max-age=${ARTWORK_MAX_AGE}`, "X-Content-Type-Options": "nosniff" })
+            res.end(image.body)
+            return
+          }
+          case "health": return json(await musicHealth())
+          case "search": return json(await music.search(url.searchParams.get("q"), url.searchParams.get("type") || "all"))
+          case "recommendations": return json(await music.recommendations(url.searchParams.get("id")))
+          case "home": return json(await music.home())
+          case "albums": return json(music.albums(url.searchParams.get("type")))
+          case "album": return json(await music.album(url.searchParams.get("id") || ""))
+          case "artists": return json(music.artists())
+          case "artist": return json(await music.artist(url.searchParams.get("id")))
+          case "artist-recommendations": return json(await music.artistRecommendations(url.searchParams.get("id")))
+          case "playlists": return json(music.playlists())
+          case "playlist": return json(music.playlist(url.searchParams.get("id")))
+          case "starred": return json(music.starred())
+        }
+      }
+      if (req.method === "POST" && route === "prepare") { const { id } = await body(); return json(await music.prepare(id)) }
+      if (req.method === "POST" && route === "stream") { const { id, refresh } = await body(); return json(await music.stream(id, { refresh: refresh === true })) }
+      if (req.method === "POST" && route === "playlists") { const { name, id } = await body(); return json(await music.createPlaylist(name, id), 201) }
+      if (req.method === "POST" && route === "playlist-tracks") { const { playlistId, id } = await body(); return json(await music.addToPlaylist(playlistId, id)) }
+      if (["PUT", "DELETE"].includes(req.method) && route === "starred") { const { id, type } = await body(); await music.star(id, type, req.method === "PUT"); return json({ ok: true }) }
+      if (req.method === "POST" && route === "scrobble") { const { id, submission } = await body(); await music.scrobble(id, submission === true); return json({ ok: true }) }
+      throw new MusicError("Ruta no encontrada.", 404)
+    } catch (error) {
+      if (res.headersSent) { res.destroy(); return }
+      const status = error instanceof MusicError ? error.status : 500
+      if (error.retryAfter) res.setHeader("Retry-After", String(error.retryAfter))
+      if (status === 500) console.error(error)
+      res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" })
+      res.end(JSON.stringify({ error: status === 500 ? "Error interno del servicio de música." : error.message }))
+    }
+  })
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
+  const localBinary = resolve(root, ".tools", process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp")
+  const binary = process.env.YTDLP_BIN || await access(localBinary).then(() => localBinary).catch(() => "yt-dlp")
+  const localPython = resolve(root, ".tools/ytmusic", process.platform === "win32" ? "Scripts/python.exe" : "bin/python")
+  const python = process.env.YTMUSIC_PYTHON || await access(localPython).then(() => localPython).catch(() => process.platform === "win32" ? "python" : "python3")
+  const music = await createMusicService({ dataDir: resolve(root, process.env.MUSIC_DATA_DIR || "data/music"), run: createYtDlpRunner(binary, { cacheDir: resolve(root, process.env.YTDLP_CACHE_DIR || ".tools/yt-dlp-cache"), python, worker: resolve(root, "server", "ytdlp-worker.py"), workers: Number(process.env.YTDLP_WORKERS) || undefined }), catalog: createYtMusicRunner(python, resolve(root, "server/ytmusic.py")) })
+  const apiOnly = process.argv.includes("--api-only")
+  const profiles = await createProfileApi({ db: openDb(resolve(root, process.env.DECIBEL_DB || "data/decibel.db")), admin: { username: process.env.DECIBEL_ADMIN_USER, password: process.env.DECIBEL_ADMIN_PASSWORD } })
+  const podcasts = createPodcastService({ db: profiles.db, parseFeed: (buffer) => parsePodcastFeed(buffer, { python }) })
+  const defaultOrigins = ["http://tauri.localhost", "https://tauri.localhost", "tauri://localhost", ...(apiOnly ? ["http://localhost:3000", "http://127.0.0.1:3000"] : [])]
+  const app = await createApp({ music, profiles, podcasts, publicDir: apiOnly ? undefined : resolve(root, "out"), allowedOrigins: (process.env.YTDLP_ALLOWED_ORIGINS || defaultOrigins.join(",")).split(",").filter(Boolean) })
+  const port = Number(apiOnly ? process.env.MUSIC_API_PORT || 3001 : process.env.MUSIC_PORT || 3000)
+  app.listen(port, process.env.MUSIC_HOST || "0.0.0.0", () => console.log(`Decibel${apiOnly ? " (API)" : " + YouTube Music"}: http://localhost:${app.address().port}`))
+  app.on("error", (error) => { console.error(error.message); process.exitCode = 1 })
+}

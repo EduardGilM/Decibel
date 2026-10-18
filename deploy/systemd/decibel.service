@@ -1,0 +1,36 @@
+[Unit]
+Description=Decibel (web app, profiles and YouTube Music)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=decibel
+Group=decibel
+WorkingDirectory=/opt/decibel
+Environment=NODE_ENV=production
+Environment=DECIBEL_TRUST_PROXY=loopback
+Environment=MUSIC_HOST=127.0.0.1
+Environment=MUSIC_PORT=3000
+Environment=DECIBEL_DB=/var/lib/decibel/decibel.db
+Environment=MUSIC_DATA_DIR=/var/lib/decibel/music
+Environment=HOME=/var/lib/decibel
+Environment=XDG_CACHE_HOME=/var/lib/decibel/cache
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=YTDLP_BIN=/var/lib/decibel/tools/ytmusic/bin/yt-dlp
+Environment=YTMUSIC_PYTHON=/var/lib/decibel/tools/ytmusic/bin/python
+Environment=YTDLP_CACHE_DIR=/var/lib/decibel/cache/yt-dlp
+Environment=YTDLP_ALLOWED_ORIGINS=tauri://localhost,http://tauri.localhost,https://tauri.localhost
+ExecStart=/usr/local/bin/node /opt/decibel/server/index.mjs
+Restart=always
+RestartSec=3
+StateDirectory=decibel
+StateDirectoryMode=0750
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/decibel
+
+[Install]
+WantedBy=multi-user.target
