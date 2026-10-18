@@ -193,6 +193,25 @@
   --safe-top: max(env(safe-area-inset-top), var(--android-inset-top, 0px));
 }
 
+/* Sticky header of the lyrics preview cards: the lines scroll under a translucent band with the player bar's
+   strong blur; its lower edge melts over --fade with an eased mask (no hard edge, no banding). */
+@utility lyrics-head-glass {
+  background-color: color-mix(in oklab, var(--lyrics-bg, var(--card)) 55%, transparent);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  backdrop-filter: blur(24px) saturate(140%);
+  --fade: 28px;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade)), rgb(0 0 0 / 0.86) calc(100% - var(--fade) * 0.8), rgb(0 0 0 / 0.64) calc(100% - var(--fade) * 0.6), rgb(0 0 0 / 0.4) calc(100% - var(--fade) * 0.4), rgb(0 0 0 / 0.16) calc(100% - var(--fade) * 0.2), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade)), rgb(0 0 0 / 0.86) calc(100% - var(--fade) * 0.8), rgb(0 0 0 / 0.64) calc(100% - var(--fade) * 0.6), rgb(0 0 0 / 0.4) calc(100% - var(--fade) * 0.4), rgb(0 0 0 / 0.16) calc(100% - var(--fade) * 0.2), transparent);
+}
+
+/* Scroller of the lyrics preview: lines melt away (eased, no hard edge) as they slide under the floating header,
+   where its blurred copy takes over; the bottom edge melts too instead of cutting a line in half. */
+@utility lyrics-under-head {
+  --head: var(--lyrics-head, 0px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent calc(var(--head) - 10px), rgb(0 0 0 / 0.12) calc(var(--head) - 3px), rgb(0 0 0 / 0.4) calc(var(--head) + 5px), rgb(0 0 0 / 0.72) calc(var(--head) + 13px), #000 calc(var(--head) + 22px), #000 calc(100% - 32px), rgb(0 0 0 / 0.55) calc(100% - 16px), transparent);
+  mask-image: linear-gradient(to bottom, transparent calc(var(--head) - 10px), rgb(0 0 0 / 0.12) calc(var(--head) - 3px), rgb(0 0 0 / 0.4) calc(var(--head) + 5px), rgb(0 0 0 / 0.72) calc(var(--head) + 13px), #000 calc(var(--head) + 22px), #000 calc(100% - 32px), rgb(0 0 0 / 0.55) calc(100% - 16px), transparent);
+}
+
 @utility glass-player {
   --muted-foreground: oklch(0.86 0 0);
   background-color: color-mix(in oklab, var(--card) 62%, transparent);

@@ -33,10 +33,10 @@ export function removeFromQueueWithFeedback(i: number) {
  * left, grey-red + remove on the right); past ~35 % of the width it is armed (stronger colour + vibration).
  */
 export function SwipeRow({ onRight, onLeft, children, className }: { onRight?: () => void; onLeft?: () => void; children: ReactNode; className?: string }) {
-  const { handlers, offset, dragging, armed } = useRowSwipe({ onRight, onLeft })
+  const { ref, handlers, offset, dragging, armed } = useRowSwipe({ onRight, onLeft })
   const right = offset > 0
   return (
-    <div data-swipe-row className={cn("relative min-w-0 select-none overflow-hidden rounded-md", className)} style={{ touchAction: "pan-y pinch-zoom" }} {...handlers}>
+    <div ref={ref} data-swipe-row className={cn("relative min-w-0 select-none overflow-hidden rounded-md", className)} style={{ touchAction: "pan-y pinch-zoom" }} {...handlers}>
       {offset !== 0 && (
         <span
           aria-hidden="true"

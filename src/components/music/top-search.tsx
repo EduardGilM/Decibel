@@ -2,15 +2,16 @@
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { Loader2, Play, Search, X } from "lucide-react"
-import { useEffect, useId, useRef, useState } from "react"
+import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { usePrepareTrack } from "@/hooks/use-prepare-track"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { Kbd } from "@/components/ui/kbd"
-import { searchHref, searchScope, useSearch } from "@/stores/search"
-import { useSession } from "@/stores/session"
+import { searchHref, useSearch } from "@/stores/search"
+import { syncRecentSearches, useRecentScope } from "@/lib/profile/search-sync"
+import { tracksOf } from "@/lib/recent-searches"
 import { usePlayer } from "@/stores/player"
 import { useProvider } from "@/lib/providers"
 import type { SearchFilter, Track } from "@/lib/types"
@@ -42,10 +43,12 @@ export function TopSearch({ mobile = false, className, placeholder = "¿Qué qui
   const urlQ = onSearch ? params.get("q") ?? "" : ""
   const q = useSearch((s) => s.q)
   const setQ = useSearch((s) => s.setQ)
-  const recent = useSearch((s) => s.recent)
-  const session = useSession()
   const provider = useProvider()
-  const scope = searchScope(session.mode, session.mode === "subsonic" ? session.creds?.serverUrl : session.ytdlpUrl, session.creds?.username)
+  const { scope, legacy: legacyScope } = useRecentScope()
+  const rows = useSearch((s) => s.rows[scope])
+  // Until the first sync (or the first change), the list this device kept before 0.1.10.
+  const legacy = useSearch((s) => s.recent[legacyScope])
+  const recentTracks = useMemo(() => (rows ? tracksOf(rows) : legacy ?? EMPTY_TRACKS), [rows, legacy])
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(-1)
   const [retry, setRetry] = useState(0)
@@ -60,9 +63,9 @@ export function TopSearch({ mobile = false, className, placeholder = "¿Qué qui
   const query = q.trim()
   const key = JSON.stringify([scope, query])
   const current = preview.key === key ? preview : undefined
-  const tracks = query ? current?.tracks || EMPTY_TRACKS : recent[scope] || EMPTY_TRACKS
+  const tracks = query ? current?.tracks || EMPTY_TRACKS : recentTracks
   const loading = !!query && !current?.tracks && !current?.error
-  const predicted = loading ? recentMatch(recent[scope] || EMPTY_TRACKS, query) : tracks[active >= 0 ? active : 0]
+  const predicted = loading ? recentMatch(recentTracks, query) : tracks[active >= 0 ? active : 0]
   usePrepareTrack(open && (query || active >= 0) ? predicted : undefined)
 
   // Back/forward and shared links update the draft, without submitting further edits.
@@ -172,7 +175,7 @@ export function TopSearch({ mobile = false, className, placeholder = "¿Qué qui
           type="search"
           value={q}
           onChange={(e) => change(e.target.value)}
-          onFocus={() => setOpen(true)}
+          onFocus={() => { setOpen(true); void syncRecentSearches() }}
           onKeyDown={(e) => {
             if (e.nativeEvent.isComposing) return
             if (e.key === "Escape") { e.preventDefault(); setOpen(false); setActive(-1) }
@@ -207,7 +210,10 @@ export function TopSearch({ mobile = false, className, placeholder = "¿Qué qui
         <Kbd className={cn("absolute top-1/2 right-3 hidden -translate-y-1/2", !q && "lg:inline-flex")}>Ctrl K</Kbd>
         {open && (
           anchor && createPortal(<div ref={panel} className={cn(glass.panel, "fixed z-40 overflow-hidden border-0! text-popover-foreground")} style={{ left: anchor.left, top: anchor.top, width: anchor.width }}>
-            <h2 className="px-4 pt-4 pb-2 text-sm font-semibold">{query ? "Canciones" : "Búsquedas recientes"}</h2>
+            <div className="flex items-center justify-between gap-2 px-4 pt-4 pb-2">
+              <h2 className="text-sm font-semibold">{query ? "Canciones" : "Búsquedas recientes"}</h2>
+              {!query && tracks.length > 0 && <button type="button" className="text-xs text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" onMouseDown={(event) => event.preventDefault()} onClick={() => { useSearch.getState().clearRecent(scope); setActive(-1); ref.current?.focus() }}>Borrar todo</button>}
+            </div>
             <div id={listId} role="listbox" aria-label={query ? "Canciones sugeridas" : "Búsquedas recientes"} aria-busy={loading} className="max-h-[min(28rem,calc(100dvh-12rem))] overflow-y-auto overscroll-contain px-2 pb-2">
               {loading && <p role="status" className="flex items-center gap-2 px-2 py-5 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" /> Buscando canciones…</p>}
               {current?.error && query && (

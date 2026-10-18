@@ -15,6 +15,16 @@ python3 src-tauri/android-overlay/patch-manifest.py src-tauri/gen/android/app/sr
 The application id is `app.decibel.music` (`identifier` in `src-tauri/tauri.conf.json`). If you fork the app
 and change it, update the `package` line of the three `.kt` files and the `J=` path above.
 
+If you regenerate the project (`npx tauri android init --ci`), restore the launcher icons afterwards, since `init`
+replaces them with Tauri's:
+
+```sh
+cp -r src-tauri/icons-symmetric/android/* src-tauri/gen/android/app/src/main/res/
+```
+
+The icons (adaptive launcher with transparent background and monochrome layer, legacy, desktop, favicon/PWA and
+`ic_stat_decibel.xml`) are regenerated with `python3 scripts/app-icons.py` (requires Pillow).
+
 - `MainActivity.kt`: edge-to-edge; the WebView draws behind the status bar and receives its height as
   `--android-inset-top` (CSS `var(--safe-top)`); the WebView is not paused while music plays; renderer
   priority stays IMPORTANT in the background. Asks for POST_NOTIFICATIONS (Android 13+) on first launch;
@@ -27,8 +37,13 @@ and change it, update the `package` line of the three `.kt` files and the `J=` p
   For podcast episodes previous/next are −15/+30 s and the playback speed is exposed in the MediaSession.
   `shareImage(base64, mime, text)` writes an image to `cache/share/` and opens the Android share sheet through
   the FileProvider Tauri already declares (`${applicationId}.fileprovider`).
+  In-app updates (bridge 6): `installUpdate(url, sha256, version)` downloads the APK into `cache/updates/`, checks
+  its sha256 and opens the system package installer through the same FileProvider (`REQUEST_INSTALL_PACKAGES`).
+  If Android does not allow Decibel to «install unknown apps» yet, it opens that Settings screen and the status
+  becomes `permission`; when the app comes back, JS calls `resumeInstall()` (no second download). The update must
+  be signed with the same key as the installed app.
 - `MediaPlaybackService.kt`: `mediaPlayback` foreground service with a MediaStyle notification (cover,
   title, artist, previous/play-pause/next or −15/+30 s, progress bar on Android 13+).
-- `patch-manifest.py`: adds the FOREGROUND_SERVICE(_MEDIA_PLAYBACK), POST_NOTIFICATIONS and WAKE_LOCK
-  permissions and the `<service>` entry.
+- `patch-manifest.py`: adds the FOREGROUND_SERVICE(_MEDIA_PLAYBACK), POST_NOTIFICATIONS, WAKE_LOCK and
+  REQUEST_INSTALL_PACKAGES permissions and the `<service>` entry.
 - Web side: `src/components/music/native-media-bridge.tsx`.

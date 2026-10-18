@@ -4,6 +4,7 @@ import { usePathname, useRouter } from "next/navigation"
 import { Suspense, useEffect, useState, type ReactNode } from "react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { AudioEngine } from "@/components/music/audio-engine"
+import { DesktopMediaBridge } from "@/components/music/desktop-media-bridge"
 import { AppDialogs } from "@/components/music/app-dialogs"
 import { PlaylistPicker } from "@/components/music/playlist-picker"
 import { ThemeController } from "@/components/theme/theme-controller"
@@ -16,6 +17,7 @@ import { DesktopTopBar } from "./desktop-top-bar"
 import { LibraryRail } from "./library-rail"
 import { MobileNav } from "./mobile-nav"
 import { ProfileDrawer } from "./profile-drawer"
+import { UpdateDialog } from "./update-dialog"
 
 function useHydrated() {
   const [h, setH] = useState(false)
@@ -49,6 +51,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="fixed inset-0 flex flex-col bg-background pt-[var(--safe-top)] pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)] md:gap-2 md:p-2">
       <AudioEngine />
+      <DesktopMediaBridge />
       <ThemeController />
       <AppDialogs />
       <PlaylistPicker />
@@ -69,6 +72,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <MobilePlayer />
       <MobileNav />
       <ProfileDrawer />
+      <UpdateDialog />
     </div>
   )
 }

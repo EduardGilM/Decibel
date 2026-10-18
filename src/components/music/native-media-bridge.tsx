@@ -24,6 +24,14 @@ interface DecibelNative {
   diagnostics?(): string
   // 0.1.6 shell (bridge version 3)
   shareImage?(base64: string, mime: string, text: string): boolean
+  // 0.1.9 shell (bridge version 5): app updates
+  version?(): number
+  installUpdate?(url: string, sha256: string, version: string): boolean
+  updateStatus?(): string
+  openUrl?(url: string): void
+  /** bridge 6 (0.1.11): installer with the APK already downloaded, after granting «Instalar apps desconocidas» */
+  resumeInstall?(): boolean
+  canInstallPackages?(): boolean
 }
 
 /** Notification permission as last reported by the shell (null: not Android / unknown). */

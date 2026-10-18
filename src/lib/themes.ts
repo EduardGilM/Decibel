@@ -3,6 +3,8 @@
  * variables, so every accent user (active chips, play buttons, sliders, liked heart,
  * now-playing row, equalizer icon, focus ring) follows the selected theme.
  */
+export { dynamicAccent } from "./cover-colors.ts"
+
 export interface ThemePreset {
   id: string
   name: string
@@ -41,13 +43,6 @@ const VARS = (primary: string, foreground: string): Record<string, string> => ({
 export function applyAccent(primary: string, foreground: string) {
   const s = document.documentElement.style
   for (const [k, v] of Object.entries(VARS(primary, foreground))) s.setProperty(k, v)
-}
-
-/** Brightens any album colour into a usable accent (CSS relative colour syntax). */
-export function dynamicAccent(color: string | undefined) {
-  const base = THEMES[0]
-  if (!color || !CSS.supports("color", `oklch(from ${color} l c h)`)) return { primary: base.primary, foreground: base.foreground }
-  return { primary: `oklch(from ${color} 0.76 max(c, 0.13) h)`, foreground: `oklch(from ${color} 0.17 0.03 h)` }
 }
 
 export function setTheme(id: string) {

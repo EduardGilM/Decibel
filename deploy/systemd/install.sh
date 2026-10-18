@@ -93,6 +93,9 @@ python3 -c 'import sys; assert sys.version_info[:2] == (3, 13), "This package re
 id decibel >/dev/null 2>&1 || useradd --system --home-dir "$state" --no-create-home --shell /usr/sbin/nologin decibel
 for dir in "$state" "$state/music" "$state/cache" "$state/cache/yt-dlp"; do state_dir "$dir"; done
 
+# Public release files (APK, desktop installers, update manifests): root writes them, the service only reads.
+root_dir /srv/decibel-releases 755
+
 # Python runtime (ytmusicapi + yt-dlp) in the root-owned tree.
 root_dir "$runtime_root" 755
 runtime_id=$(sha256sum runtime/requirements.lock | cut -c1-16)

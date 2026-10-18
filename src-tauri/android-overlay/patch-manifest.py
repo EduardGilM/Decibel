@@ -16,4 +16,11 @@ if "MediaPlaybackService" not in s:
     assert s.count("MediaPlaybackService") == 1 and "WAKE_LOCK" in s
     open(p + ".tmp", "w").write(s)
     import os; os.replace(p + ".tmp", p)
+if "REQUEST_INSTALL_PACKAGES" not in s:
+    # In-app updates (0.1.9): the shell hands the downloaded APK to the system installer.
+    s = s.replace('''    <uses-permission android:name="android.permission.INTERNET" />''', '''    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />''', 1)
+    assert "REQUEST_INSTALL_PACKAGES" in s
+    open(p + ".tmp", "w").write(s)
+    import os; os.replace(p + ".tmp", p)
 print("manifest ok")

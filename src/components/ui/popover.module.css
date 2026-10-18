@@ -22,6 +22,13 @@
   -webkit-backdrop-filter: blur(56px) saturate(180%);
   backdrop-filter: blur(56px) saturate(180%);
 }
+/* Same glass as the mobile profile drawer and the player bar (glass-player): used by the account menu. */
+.player { --muted-foreground: oklch(0.86 0 0); }
+.player .surface {
+  background-color: color-mix(in oklab, var(--card) 62%, transparent);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  backdrop-filter: blur(24px) saturate(140%);
+}
 .frame { position: absolute; pointer-events: none; overflow: visible; z-index: 0; }
 .body { position: relative; z-index: 1; }
 

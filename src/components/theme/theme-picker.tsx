@@ -5,9 +5,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from "@/components/ui/drawer"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { DYNAMIC_ID, setTheme, THEMES } from "@/lib/themes"
+import { DYNAMIC_ID, dynamicAccent, setTheme, THEMES } from "@/lib/themes"
 import { useNowPlayingTint } from "@/lib/use-tint"
-import { dynamicAccent } from "@/lib/themes"
 import { cn } from "@/lib/utils"
 import { useThemeId } from "./theme-controller"
 
@@ -43,7 +42,7 @@ function Swatch({ id, name, primary, foreground, active, icon, className, style 
 
 function Grid() {
   const active = useThemeId()
-  const tint = useNowPlayingTint()
+  const tint = useNowPlayingTint("dominant")
   const dyn = dynamicAccent(tint)
   return (
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">

@@ -70,4 +70,4 @@ export function GlassShape({ geo, minCornerRadius }: { geo?: GlassGeometry; minC
   )
 }
 
-export const glassClasses = { glass: styles.glass, menu: styles.menu, body: styles.body } as const
+export const glassClasses = { glass: styles.glass, menu: styles.menu, body: styles.body, player: styles.player } as const

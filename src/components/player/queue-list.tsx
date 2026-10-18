@@ -32,7 +32,7 @@ function RowBody({ i, active }: { i: number; active: boolean }) {
         </div>
       </button>
       {!active && (
-        <Button variant="ghost" size="icon" className="size-10 shrink-0 text-muted-foreground" aria-label={`Quitar ${t.title} de la cola`} onClick={() => usePlayer.getState().removeAt(i)}>
+        <Button variant="ghost" size="icon" className="size-10 shrink-0 text-muted-foreground md:opacity-0 md:group-hover/row:opacity-100 md:focus-visible:opacity-100" aria-label={`Quitar ${t.title} de la cola`} onClick={() => usePlayer.getState().removeAt(i)}>
           <X />
         </Button>
       )}
@@ -49,13 +49,13 @@ function SortableRow({ id, i }: { id: string; i: number }) {
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform), transition }}
-      className={cn("relative flex items-center gap-1 rounded-lg py-1.5 pr-2 pl-0.5 hover:bg-muted/60", isDragging && "z-10 bg-secondary shadow-lg shadow-black/40")}
+      className={cn("group/row relative flex items-center gap-1 rounded-lg py-1.5 pr-2 pl-0.5 hover:bg-muted/60", isDragging && "z-10 bg-secondary shadow-lg shadow-black/40")}
     >
       <button
         ref={setActivatorNodeRef}
         type="button"
         aria-label={`Mover ${title}`}
-        className="flex h-11 w-9 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
+        className="flex h-11 w-9 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing md:opacity-0 md:group-hover/row:opacity-100 md:focus-visible:opacity-100"
         // The full-screen player is a vaul drawer that is dragged down from anywhere: the grip's gesture must
         // reorder only. data-vaul-no-drag makes vaul ignore it; stopping propagation keeps the pointerdown
         // from ever reaching the drawer (dnd-kit's own listener runs first).
@@ -151,7 +151,7 @@ export function SaveQueueButton({ className }: { className?: string }) {
   )
 }
 
-export function QueueList({ className, showCurrent = true, showSave = showCurrent }: { className?: string; showCurrent?: boolean; showSave?: boolean }) {
+export function QueueList({ className, showCurrent = true, showSave = showCurrent, heading = true }: { className?: string; showCurrent?: boolean; showSave?: boolean; heading?: boolean }) {
   const queue = usePlayer((s) => s.queue)
   const index = usePlayer((s) => s.index)
   const loadingRecommendations = usePlayer((s) => s.loadingRecommendations)
@@ -174,7 +174,7 @@ export function QueueList({ className, showCurrent = true, showSave = showCurren
       </section>}
       {index < queue.length - 1 && (
         <section className="flex flex-col gap-1">
-          <h3 className="px-2 text-sm font-semibold">A continuación</h3>
+          {heading && <h3 className="px-2 text-sm font-semibold">A continuación</h3>}
           <UpNext from={index + 1} />
         </section>
       )}

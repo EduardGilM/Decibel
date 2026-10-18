@@ -3,6 +3,7 @@
 import { create } from "zustand"
 import { createJSONStorage, persist } from "zustand/middleware"
 import type { Track } from "@/lib/types"
+import { RECOMMENDATIONS_TIMEOUT_MS } from "../lib/audio/watchdog.ts"
 
 /** Pre-rename key ("decibel-x" -> "musica-x"); read once as fallback, removed on the next write. */
 const legacyKey = (key: string) => key.replace(/^decibel-/, "musica-")
@@ -198,7 +199,8 @@ export const usePlayer = create<PlayerState>()(
               state.playbackId === playbackId && state.isPlaying && state.repeat === "off" && state.recommendationLoader === recommendationLoader
           }
           try {
-            const tracks = await recommendationLoader(track, controller.signal)
+            // Bounded: the play button shows a spinner meanwhile, it must not spin for minutes.
+            const tracks = await recommendationLoader(track, AbortSignal.any([controller.signal, AbortSignal.timeout(RECOMMENDATIONS_TIMEOUT_MS)]))
             if (!stillCurrent()) return
             const seen = new Set(queue.map((item) => item.id))
             const fresh = tracks.filter((item) => {
@@ -210,7 +212,10 @@ export const usePlayer = create<PlayerState>()(
             set({ queue: [...queue, ...fresh], original: [...get().original, ...fresh], index: index + 1,
               position: 0, isPlaying: true, playbackId: playbackId + 1, sourceLabel: "Radio de YouTube" })
           } catch (error) {
-            if (stillCurrent()) set({ isPlaying: false, buffering: false, recommendationError: error instanceof Error ? error.message : "No se pudieron obtener recomendaciones de YouTube." })
+            if (stillCurrent()) {
+              const timedOut = (error as { name?: string } | null)?.name === "TimeoutError"
+              set({ isPlaying: false, buffering: false, recommendationError: timedOut ? "YouTube está tardando demasiado en sugerir la siguiente canción." : error instanceof Error ? error.message : "No se pudieron obtener recomendaciones de YouTube." })
+            }
           } finally {
             if (recommendationRequest === controller) {
               recommendationRequest = null

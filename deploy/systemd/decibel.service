@@ -21,6 +21,8 @@ Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=YTDLP_BIN=/opt/decibel-runtime/ytmusic/bin/yt-dlp
 Environment=YTMUSIC_PYTHON=/opt/decibel-runtime/ytmusic/bin/python
 Environment=YTDLP_CACHE_DIR=/var/lib/decibel/cache/yt-dlp
+# Public downloads and update manifests (/download, /releases/*, /api/app/version); root-owned, read-only here.
+Environment=DECIBEL_RELEASES_DIR=/srv/decibel-releases
 Environment=YTDLP_ALLOWED_ORIGINS=tauri://localhost,http://tauri.localhost,https://tauri.localhost
 ExecStart=/usr/local/bin/node /opt/decibel/server/index.mjs
 Restart=always
@@ -32,7 +34,7 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 ReadWritePaths=/var/lib/decibel
-ReadOnlyPaths=/opt/decibel-runtime /opt/decibel
+ReadOnlyPaths=/opt/decibel-runtime /opt/decibel /srv/decibel-releases
 
 [Install]
 WantedBy=multi-user.target

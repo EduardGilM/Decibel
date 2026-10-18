@@ -1,7 +1,7 @@
 "use client"
 
 import { ArtistLinks } from "@/components/music/artist-links"
-import { ChevronDown, Mic, Pause, Play } from "lucide-react"
+import { ChevronDown, Mic, Pause, Play, Radio, RotateCcw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from "@/components/ui/drawer"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -17,6 +17,10 @@ import { chipClass } from "@/components/music/filter-chips"
 import { LyricsPanel } from "./lyrics-panel"
 import { useNowPlayingTint } from "@/lib/use-tint"
 import type { Track } from "@/lib/types"
+import { useMiniSwipe } from "@/hooks/use-mini-swipe"
+import { miniNeighbors, type MiniNeighbor } from "@/lib/mini-swipe"
+import { useShallow } from "zustand/react/shallow"
+import { useMemo, useRef } from "react"
 
 /** Lyrics card under the controls: synced lines with a faint cover tint; tap (or ⤢) opens the full lyrics view. */
 function LyricsCard({ track }: { track: Track }) {
@@ -24,11 +28,69 @@ function LyricsCard({ track }: { track: Track }) {
   const expand = () => usePlayer.getState().setFullTab("lyrics")
   return (
     <div
-      className="overflow-hidden rounded-2xl bg-white/[0.07] [&_[data-lyrics-viewport]]:max-h-64"
-      style={tint ? { backgroundColor: `color-mix(in oklab, ${tint} 24%, rgb(255 255 255 / 0.04))` } : undefined}
+      className="overflow-hidden rounded-2xl bg-(--lyrics-bg) [--lyrics-bg:rgb(255_255_255/0.07)] [&_[data-lyrics-viewport]]:max-h-80"
+      style={tint ? { "--lyrics-bg": `color-mix(in oklab, ${tint} 24%, rgb(255 255 255 / 0.04))` } as React.CSSProperties : undefined}
       onClick={(e) => { if (!(e.target as HTMLElement).closest("button")) expand() }}
     >
       <LyricsPanel track={track} preview scrollable title="Letra" onExpand={expand} className="px-5 pt-4 pb-5" />
+    </div>
+  )
+}
+
+/** A song that peeks in from the side while swiping the mini player (no links: it is only a preview). */
+function MiniPeek({ neighbor, side, peekRef }: { neighbor: NonNullable<MiniNeighbor>; side: "left" | "right"; peekRef?: React.Ref<HTMLDivElement> }) {
+  const track = "track" in neighbor ? neighbor.track : null
+  return (
+    <div ref={peekRef} aria-hidden className={`pointer-events-none absolute inset-y-0 flex w-max max-w-[60vw] items-center gap-3 ${side === "left" ? "right-full mr-6" : "left-full ml-6"}`}>
+      {track ? <Cover coverArt={track.coverArt} alt="" size={100} rounded="sm" className="size-11 shrink-0" />
+        : <div className="flex size-11 shrink-0 items-center justify-center rounded-sm bg-white/10"><Radio className="size-5" /></div>}
+      <div className="min-w-0">
+        <div className="truncate text-sm font-medium">{track ? track.title : "Radio de YouTube"}</div>
+        <div className="flex items-center gap-1 truncate text-[13px] text-foreground/70">
+          {"restart" in neighbor && neighbor.restart ? <><RotateCcw className="size-3.5 shrink-0" />Desde el principio</> : track ? track.artist : "Canciones parecidas"}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Cover + title of the mini player. Tap opens the full player; a horizontal swipe skips (left = next,
+ * right = previous, same store actions as the buttons) with the neighbour song peeking in.
+ */
+function MiniStrip({ track }: { track: Track }) {
+  const view = usePlayer(useShallow((s) => ({
+    queue: s.queue, index: s.index, repeat: s.repeat, position: s.position > 3 ? 4 : 0, hasRecommendations: !!s.recommendationLoader,
+  })))
+  const { next, prev } = useMemo(() => miniNeighbors(view), [view])
+  const row = useRef<HTMLDivElement>(null)
+  const prevPeek = useRef<HTMLDivElement>(null)
+  const { handlers, offset, dragging } = useMiniSwipe({
+    hasNext: !!next, hasPrev: !!prev,
+    // Neighbours sit 24px (mr-6/ml-6) beside the current song: travel exactly enough to put them where it is.
+    distance: (side) => (side === "next" ? row.current?.offsetWidth ?? 0 : prevPeek.current?.offsetWidth ?? 0) + 24,
+    onNext: () => { void usePlayer.getState().next() },
+    onPrev: () => usePlayer.getState().prev(),
+  })
+  return (
+    // The blank area beside a short title opens the player too (the role=button below is only as wide as its text).
+    <div {...handlers} data-dragging={dragging || undefined} className="relative min-w-0 flex-1 cursor-pointer touch-pan-y self-stretch overflow-hidden rounded-lg flex items-center"
+      onClick={() => usePlayer.getState().setFullOpen(true)}>
+      <div ref={row} className="relative w-max max-w-full" style={offset ? { transform: `translate3d(${offset}px,0,0)` } : undefined}>
+        {/* Only the side being revealed shows its neighbour; at rest nothing peeks. */}
+        {prev && offset > 0 && <MiniPeek neighbor={prev} side="left" peekRef={prevPeek} />}
+        {/* The whole area opens the player; only the artist text is a link (a link cannot sit inside a button). */}
+        <div role="button" tabIndex={0} aria-label="Abrir reproductor" aria-roledescription="Desliza para cambiar de canción" className="flex min-w-0 cursor-pointer items-center gap-3 rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={() => usePlayer.getState().setFullOpen(true)}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); usePlayer.getState().setFullOpen(true) } }}>
+          <Cover coverArt={track.coverArt} alt={track.album} size={100} rounded="sm" className="size-11 shrink-0" />
+          <div className="min-w-0">
+            <div className="truncate text-sm font-medium">{track.title}</div>
+            <ArtistLinks track={track} className="block truncate text-[13px] text-foreground/70" />
+          </div>
+        </div>
+        {next && offset < 0 && <MiniPeek neighbor={next} side="right" />}
+      </div>
     </div>
   )
 }
@@ -80,16 +142,7 @@ export function MobilePlayer() {
       <div className="fixed inset-x-2 bottom-[calc(3.5rem+env(safe-area-inset-bottom)+6px)] z-40 overflow-hidden rounded-xl glass-player shadow-lg shadow-black/20 md:hidden">
         {/* pb-3: room for the seek line so its touch zone mostly sits below the controls */}
         <div className="relative flex items-center gap-2 p-1.5 pr-1 pb-3">
-          {/* The whole area opens the player; only the artist text is a link (a link cannot sit inside a button). */}
-          <div role="button" tabIndex={0} aria-label="Abrir reproductor" className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            onClick={() => usePlayer.getState().setFullOpen(true)}
-            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); usePlayer.getState().setFullOpen(true) } }}>
-            <Cover coverArt={track.coverArt} alt={track.album} size={100} rounded="sm" className="size-11 shrink-0" />
-            <div className="min-w-0">
-              <div className="truncate text-sm font-medium">{track.title}</div>
-              <ArtistLinks track={track} className="block truncate text-[13px] text-foreground/70" />
-            </div>
-          </div>
+          <MiniStrip track={track} />
           <TrackSaveButtons track={track} buttonClassName="size-10" />
           <Button variant="ghost" size="icon" className="size-11 [&_svg:not([class*='size-'])]:size-6" aria-label={isPlaying ? "Pausar" : "Reproducir"} onClick={() => usePlayer.getState().toggle()}>
             {isPlaying ? <Pause className="fill-current" /> : <Play className="fill-current" />}

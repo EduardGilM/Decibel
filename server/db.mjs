@@ -112,6 +112,31 @@ const MIGRATIONS = [
      PRIMARY KEY (user_id, podcast_id)
    );
    CREATE INDEX podcast_follows_user ON podcast_follows(user_id, followed_at DESC);`,
+  // Recent searches of the search dropdown, per profile and source (synced between devices).
+  `CREATE TABLE IF NOT EXISTS recent_searches (
+     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     source TEXT NOT NULL,
+     kind TEXT NOT NULL,
+     item_id TEXT NOT NULL,
+     item_json TEXT NOT NULL,
+     searched_at INTEGER NOT NULL,
+     PRIMARY KEY (user_id, source, kind, item_id)
+   );
+   CREATE INDEX IF NOT EXISTS recent_searches_user ON recent_searches(user_id, source, searched_at DESC);
+   CREATE TABLE IF NOT EXISTS recent_searches_removed (
+     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     source TEXT NOT NULL,
+     kind TEXT NOT NULL,
+     item_id TEXT NOT NULL,
+     removed_at INTEGER NOT NULL,
+     PRIMARY KEY (user_id, source, kind, item_id)
+   );
+   CREATE TABLE IF NOT EXISTS recent_searches_cleared (
+     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     source TEXT NOT NULL,
+     cleared_at INTEGER NOT NULL,
+     PRIMARY KEY (user_id, source)
+   );`,
 ]
 
 /** Opens (and migrates) the profiles database. `:memory:` for tests. */

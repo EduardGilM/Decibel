@@ -2,6 +2,7 @@
 
 import { ArtistLinks } from "@/components/music/artist-links"
 import Link from "next/link"
+import type { CSSProperties } from "react"
 import { X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -14,6 +15,23 @@ import { usePlayer } from "@/stores/player"
 import { useMediaQuery } from "@/hooks/use-media-query"
 import { QueueList } from "./queue-list"
 import { LyricsPanel } from "./lyrics-panel"
+
+/** «A continuación» card (Spotify style): live, reorderable, own scroll; nothing at all when no song comes next. */
+function PanelUpNext() {
+  const upcoming = usePlayer((s) => s.queue.length - s.index - 1)
+  if (upcoming <= 0) return null
+  return (
+    <section aria-label="A continuación" className="flex min-h-0 flex-col rounded-xl bg-white/[0.04] pt-3 pb-2">
+      <div className="flex items-center justify-between gap-2 px-4 pb-1">
+        <h3 className="text-[15px] font-bold">A continuación</h3>
+        <Link href="/queue/" className="inline-flex h-7 items-center rounded-full bg-white/[0.08] px-3 text-[13px] font-semibold text-muted-foreground transition-colors hover:bg-white/[0.14] hover:text-foreground">Ver cola</Link>
+      </div>
+      <div className="max-h-[min(420px,50vh)] overflow-y-auto overscroll-contain">
+        <QueueList showCurrent={false} heading={false} className="px-2" />
+      </div>
+    </section>
+  )
+}
 
 /** Desktop right column (xl+): big artwork over a blurred-cover glow, lyrics preview card, up next. */
 export function NowPlayingPanel() {
@@ -46,13 +64,11 @@ export function NowPlayingPanel() {
           </div>
         </div>
         <div className="flex flex-col gap-3 px-4 pb-4">
+          <PanelUpNext />
           {/* Lyrics preview: card with a faint, darkened hint of the cover colour. */}
-          {lyricsOpen && !track.podcast && <div className="overflow-hidden rounded-xl bg-white/[0.06]" style={tint ? { backgroundColor: `color-mix(in oklab, ${tint} 14%, rgb(255 255 255 / 0.05))` } : undefined}>
+          {lyricsOpen && !track.podcast && <div className="overflow-hidden rounded-xl bg-(--lyrics-bg) [--lyrics-bg:rgb(255_255_255/0.06)]" style={tint ? { "--lyrics-bg": `color-mix(in oklab, ${tint} 14%, rgb(255 255 255 / 0.05))` } as CSSProperties : undefined}>
             <LyricsPanel track={track} preview scrollable className="px-4 py-4" />
           </div>}
-          <div className="rounded-xl bg-white/[0.04] py-2">
-            <QueueList showCurrent={false} className="px-2" />
-          </div>
         </div>
       </ScrollArea>
     </aside>

@@ -91,7 +91,7 @@ test("migration 3 preserves version 2 podcast progress, and follows survive reop
   podcasts.saveProgress(user.id, episodeId, { position: 123.5 })
   db.exec("DROP TABLE podcast_follows; PRAGMA user_version = 2;")
   db.close(); db = openDb(path)
-  assert.equal(db.prepare("PRAGMA user_version").get().user_version, 3)
+  assert.equal(db.prepare("PRAGMA user_version").get().user_version, 4)
   assert.equal((await createAccounts(db).login("Existing", "same-password")).user.id, user.id)
   podcasts = createPodcastService({ db, request: fixtureRequest(), now: () => 123456 })
   assert.equal(podcasts.getProgress(user.id, episodeId).position, 123.5)

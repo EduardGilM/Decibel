@@ -3,6 +3,7 @@ import { openDb } from "./db.mjs"
 import { MusicError } from "./errors.mjs"
 import { createLibrary } from "./library.mjs"
 import { createRequestSecurity } from "./request-security.mjs"
+import { createRecentSearches } from "./recent-searches.mjs"
 
 export const COOKIE = "decibel_session"
 const PUBLIC = new Set(["/api/health", "/api/music/health", "/api/auth/login"])
@@ -41,6 +42,7 @@ export async function createProfileApi({ db = openDb(":memory:"), seed = true, a
   const security = createRequestSecurity({ trustProxy })
   const accounts = createAccounts(db, { now })
   const library = createLibrary(db, { now })
+  const searches = createRecentSearches(db, { now })
   if (Array.isArray(seed)) await accounts.seed(seed)
   else if (seed) {
     // First start with an empty database: one administrator; existing installs are never touched.
@@ -139,6 +141,18 @@ export async function createProfileApi({ db = openDb(":memory:"), seed = true, a
         if (method === "GET") return json(library.history(user.id, src(), url.searchParams.get("limit"))), true
         if (method === "POST") { const { source, ...entry } = await readJson(req); library.addHistory(user.id, source, entry); return json({ ok: true }, 201), true }
         if (method === "DELETE") { library.clearHistory(user.id, src()); return json({ ok: true }), true }
+      }
+      // Recent searches (GET list; POST one search or a batch of queued operations; DELETE one or all).
+      if (path === "/api/me/searches") {
+        if (method === "GET") return json(searches.list(user.id, src())), true
+        if (method === "POST") {
+          const { source, ops, kind, item, at } = await readJson(req, 400_000)
+          return json(searches.apply(user.id, source, ops ?? [{ op: "add", kind, item, at }])), true
+        }
+        if (method === "DELETE") {
+          const { source, kind, id, at } = await readJson(req, 4000)
+          return json(searches.apply(user.id, source, [id === undefined ? { op: "clear", at } : { op: "remove", kind, id, at }])), true
+        }
       }
       if (path === "/api/me/settings") {
         if (method === "GET") return json(library.settings(user.id)), true

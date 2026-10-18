@@ -17,7 +17,7 @@ export function useThemeId() {
 /** Keeps the "Dinámico" theme in sync with the current album art. */
 export function ThemeController() {
   const id = useThemeId()
-  const tint = useNowPlayingTint()
+  const tint = useNowPlayingTint("dominant")
   useEffect(() => {
     if (id !== DYNAMIC_ID) return
     const { primary, foreground } = dynamicAccent(tint)

@@ -11,9 +11,10 @@ import { createProfileApi } from "./profile-api.mjs"
 import { createPodcastService } from "./podcasts.mjs"
 import { handlePodcastApi } from "./podcast-api.mjs"
 import { parsePodcastFeed } from "./podcast-feed.mjs"
+import { createReleases } from "./releases.mjs"
 import { createRequestSecurity } from "./request-security.mjs"
 
-export async function createApp({ music, publicDir, allowedOrigins = [], artwork = createArtworkService(), profiles, podcasts = profiles ? createPodcastService({ db: profiles.db }) : undefined, trustProxy, now = Date.now }) {
+export async function createApp({ music, publicDir, allowedOrigins = [], artwork = createArtworkService(), profiles, podcasts = profiles ? createPodcastService({ db: profiles.db }) : undefined, releases = createReleases({ dir: undefined }), trustProxy, now = Date.now }) {
   const security = createRequestSecurity({ trustProxy })
   let healthCache
   const musicHealth = () => {
@@ -30,6 +31,8 @@ export async function createApp({ music, publicDir, allowedOrigins = [], artwork
     try {
       const url = new URL(req.url, "http://localhost")
       if (!url.pathname.startsWith("/api/")) {
+        // Public downloads (/download, /releases/*) from DECIBEL_RELEASES_DIR, outside the app and git.
+        if (await releases.handle(req, res, url)) return
         if (!publicDir) throw new MusicError("Ruta no encontrada.", 404)
         return await handler(req, res, { public: publicDir, directoryListing: false })
       }
@@ -45,6 +48,8 @@ export async function createApp({ music, publicDir, allowedOrigins = [], artwork
         res.setHeader("Access-Control-Allow-Credentials", "true")
       }
       if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return }
+      // Latest app version for the update notice; public like /download (CORS above lets the apps read it).
+      if (url.pathname === "/api/app/version" && await releases.handle(req, res, url)) return
       const json = (value, status = 200) => { res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" }); res.end(JSON.stringify(value)) }
       let user
       if (profiles) {
@@ -113,8 +118,9 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const apiOnly = process.argv.includes("--api-only")
   const profiles = await createProfileApi({ db: openDb(resolve(root, process.env.DECIBEL_DB || "data/decibel.db")), admin: { username: process.env.DECIBEL_ADMIN_USER, password: process.env.DECIBEL_ADMIN_PASSWORD } })
   const podcasts = createPodcastService({ db: profiles.db, parseFeed: (buffer) => parsePodcastFeed(buffer, { python }) })
+  const releases = createReleases({ dir: process.env.DECIBEL_RELEASES_DIR ? resolve(process.env.DECIBEL_RELEASES_DIR) : undefined })
   const defaultOrigins = ["http://tauri.localhost", "https://tauri.localhost", "tauri://localhost", ...(apiOnly ? ["http://localhost:3000", "http://127.0.0.1:3000"] : [])]
-  const app = await createApp({ music, profiles, podcasts, publicDir: apiOnly ? undefined : resolve(root, "out"), allowedOrigins: (process.env.YTDLP_ALLOWED_ORIGINS || defaultOrigins.join(",")).split(",").filter(Boolean) })
+  const app = await createApp({ music, profiles, podcasts, releases, publicDir: apiOnly ? undefined : resolve(root, "out"), allowedOrigins: (process.env.YTDLP_ALLOWED_ORIGINS || defaultOrigins.join(",")).split(",").filter(Boolean) })
   const port = Number(apiOnly ? process.env.MUSIC_API_PORT || 3001 : process.env.MUSIC_PORT || 3000)
   app.listen(port, process.env.MUSIC_HOST || "0.0.0.0", () => console.log(`Decibel${apiOnly ? " (API)" : " + YouTube Music"}: http://localhost:${app.address().port}`))
   app.on("error", (error) => { console.error(error.message); process.exitCode = 1 })

@@ -28,6 +28,9 @@ import android.util.Log
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.core.content.FileProvider
+import java.net.HttpURLConnection
+import java.net.URL
+import java.security.MessageDigest
 import org.json.JSONObject
 import java.io.File
 import java.lang.ref.WeakReference
@@ -66,6 +69,9 @@ object DecibelMedia {
   var podcast = false; private set
   private var rate = 1f
   private var updates = 0 // bridge calls received (diagnostics)
+  /** In-app update download: idle, downloading:<pct>, verifying, installing or error:<message>. */
+  @Volatile private var updateState = "idle"
+  @Volatile private var pendingApk: File? = null
 
   /** True while the WebView must keep running in the background. */
   val keepAlive get() = active
@@ -106,7 +112,7 @@ object DecibelMedia {
       }.start()
     }
     @JavascriptInterface fun stop() { main.post { release() } }
-    @JavascriptInterface fun version(): Int = 4
+    @JavascriptInterface fun version(): Int = 6
     /** Whether the playback notification can be shown (permission granted and notifications on for the app). */
     @JavascriptInterface fun notificationsEnabled(): Boolean = notificationsAllowed()
     /** System dialog when Android still allows it, otherwise the app's notification settings. */
@@ -139,6 +145,94 @@ object DecibelMedia {
       }
       true
     } catch (e: Exception) { Log.w(TAG, "shareImage", e); false }
+    /**
+     * App update (0.1.9, bridge 5): downloads the APK over https into the app cache, checks its sha256 and opens
+     * the system installer through the FileProvider (cache-path). Android itself refuses an APK signed with
+     * another key. Progress is polled from JS with updateStatus(). Returns false if it cannot start.
+     */
+    @JavascriptInterface fun installUpdate(url: String, sha256: String, version: String): Boolean {
+      if (!url.startsWith("https://") || !Regex("[a-f0-9]{64}").matches(sha256) || !Regex("[0-9][0-9A-Za-z.-]{0,30}").matches(version)) return false
+      if (updateState.startsWith("downloading") || updateState == "verifying") return true
+      pendingApk = null
+      updateState = "downloading:0"
+      Thread {
+        try {
+          val dir = File(app.cacheDir, "updates").apply { mkdirs() }
+          dir.listFiles()?.forEach { it.delete() }
+          val file = File(dir, "Decibel-$version.apk")
+          val conn = (URL(url).openConnection() as HttpURLConnection).apply { connectTimeout = 15000; readTimeout = 30000; instanceFollowRedirects = false }
+          if (conn.responseCode != 200) throw IllegalStateException("HTTP ${conn.responseCode}")
+          val total = conn.contentLengthLong
+          val digest = MessageDigest.getInstance("SHA-256")
+          var done = 0L
+          conn.inputStream.use { input -> file.outputStream().use { out ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+              val n = input.read(buffer); if (n < 0) break
+              out.write(buffer, 0, n); digest.update(buffer, 0, n); done += n
+              if (total > 0) updateState = "downloading:${(done * 100 / total).toInt()}"
+            }
+          } }
+          updateState = "verifying"
+          val hex = digest.digest().joinToString("") { "%02x".format(it) }
+          if (hex != sha256) { file.delete(); throw IllegalStateException("sha256 no coincide") }
+          pendingApk = file
+          main.post { launchInstaller() }
+        } catch (e: Exception) {
+          Log.w(TAG, "installUpdate", e)
+          updateState = "error:${e.message ?: "descarga fallida"}"
+        }
+      }.start()
+      return true
+    }
+    @JavascriptInterface fun updateStatus(): String = updateState
+    /**
+     * 0.1.11 (bridge 6): after «Instalar apps desconocidas» was granted in Settings, hands the already
+     * downloaded and verified APK to the installer without downloading it again. False if there is none.
+     */
+    @JavascriptInterface fun resumeInstall(): Boolean {
+      if (pendingApk?.exists() != true) return false
+      main.post { launchInstaller() }
+      return true
+    }
+    /** Whether Android lets this app open the package installer (Settings → «Instalar apps desconocidas»). */
+    @JavascriptInterface fun canInstallPackages(): Boolean =
+      Build.VERSION.SDK_INT < Build.VERSION_CODES.O || app.packageManager.canRequestPackageInstalls()
+
+    /**
+     * System installer for the verified APK through the FileProvider (cache-path). Without the «install
+     * unknown apps» permission it opens that settings screen for Decibel instead and reports "permission";
+     * JS calls resumeInstall() when the app comes back. Same keystore, so it installs over the current app.
+     */
+    private fun launchInstaller() {
+      val file = pendingApk
+      if (file == null || !file.exists()) { updateState = "error:No se encontró la descarga"; return }
+      val from = activity.get()
+      try {
+        if (!canInstallPackages()) {
+          val settings = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, android.net.Uri.parse("package:${app.packageName}"))
+          if (from != null) from.startActivity(settings) else app.startActivity(settings.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+          updateState = "permission"
+          return
+        }
+        val uri = FileProvider.getUriForFile(app, "${app.packageName}.fileprovider", file)
+        val install = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
+          .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        if (from != null) from.startActivity(install) else app.startActivity(install.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        updateState = "installing"
+      } catch (e: Exception) { Log.w(TAG, "installer", e); updateState = "error:No se pudo abrir el instalador" }
+    }
+    /** Opens an https page (the download page) in the browser. */
+    @JavascriptInterface fun openUrl(url: String) {
+      if (!url.startsWith("https://")) return
+      main.post {
+        try {
+          val view = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
+          val from = activity.get()
+          if (from != null) from.startActivity(view) else app.startActivity(view.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: Exception) { Log.w(TAG, "openUrl", e) }
+      }
+    }
     /** JSON snapshot for the "Reproducción en segundo plano" check in Ajustes. */
     @JavascriptInterface fun diagnostics(): String = JSONObject()
       .put("bridge", 4)

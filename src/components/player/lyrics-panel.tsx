@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react"
 import { Loader2, Maximize2, Mic } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { activeLyricsLine, findLyricsWithRetry, type LyricsResult } from "@/lib/lyrics"
@@ -17,6 +17,10 @@ export function LyricsPanel({ track, className, scrollable = false, preview = fa
   const [state, setState] = useState<{ key: string; result?: LyricsResult | null; error?: string }>({ key: "" })
   const [retry, setRetry] = useState(0)
   const currentRef = useRef<HTMLButtonElement>(null)
+  const headRef = useRef<HTMLDivElement>(null)
+  const viewportRef = useRef<HTMLDivElement>(null)
+  const ghostRef = useRef<HTMLDivElement>(null)
+  const [headHeight, setHeadHeight] = useState(0)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -48,19 +52,32 @@ export function LyricsPanel({ track, className, scrollable = false, preview = fa
     const viewport = line?.closest<HTMLElement>("[data-lyrics-viewport], [data-slot=scroll-area-viewport]")
     if (!line || !viewport) return
     const rect = line.getBoundingClientRect(), bounds = viewport.getBoundingClientRect()
-    if (rect.top < bounds.top + 24 || rect.bottom > bounds.bottom - 24) {
+    const head = viewport.parentElement?.querySelector<HTMLElement>(":scope > [data-lyrics-head]")?.offsetHeight ?? 0 // header over the lines
+    if (rect.top < bounds.top + head + 24 || rect.bottom > bounds.bottom - 24) {
       viewport.scrollTo({ top: viewport.scrollTop + rect.top - bounds.top - bounds.height * 0.35, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" })
     }
   }, [active, key])
 
-  return (
-    <section aria-label="Letras" className={cn("min-w-0 px-4 py-5", className)}>
-      <div className="mb-4 flex items-center justify-between gap-2">
-        <h3 className="flex items-center gap-2 text-sm font-semibold">{title ?? (preview ? "Vista previa de la letra" : <><Mic className="size-4" /> Letras</>)}</h3>
-        {onExpand ? (
-          <Button variant="ghost" size="icon" className="-my-2 -mr-2 size-9 rounded-full bg-black/20 text-foreground hover:bg-black/30" aria-label="Ampliar letra" onClick={onExpand}><Maximize2 className="size-4" /></Button>
-        ) : result && !result.instrumental && <span className="text-xs text-muted-foreground">{result.lines.length ? "Sincronizadas" : "Sin sincronizar"}</span>}
-      </div>
+  // Preview cards: the header floats over the scroller; its height drives the spacer and the fade of the lines.
+  const floatingHead = preview && scrollable
+  useEffect(() => {
+    const head = headRef.current
+    if (!floatingHead || !head) return
+    const observer = new ResizeObserver(() => setHeadHeight(head.offsetHeight))
+    observer.observe(head)
+    return () => observer.disconnect()
+  }, [floatingHead])
+
+  const header = (
+    <div className="flex items-center justify-between gap-2">
+      <h3 className="flex items-center gap-2 text-sm font-semibold">{title ?? (preview ? "Vista previa de la letra" : <><Mic className="size-4" /> Letras</>)}</h3>
+      {onExpand ? (
+        <Button variant="ghost" size="icon" className="-my-2 -mr-2 size-9 rounded-full bg-black/20 text-foreground hover:bg-black/30" aria-label="Ampliar letra" onClick={onExpand}><Maximize2 className="size-4" /></Button>
+      ) : result && !result.instrumental && <span className="text-xs text-muted-foreground">{result.lines.length ? "Sincronizadas" : "Sin sincronizar"}</span>}
+    </div>
+  )
+  const body = (
+    <>
       {current.result === undefined && !current.error && (
         <p role="status" className="flex items-center gap-2 py-4 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" /> Buscando letra…</p>
       )}
@@ -72,15 +89,53 @@ export function LyricsPanel({ track, className, scrollable = false, preview = fa
       )}
       {result === null && <p className="py-3 text-sm text-muted-foreground">No hay letra para esta canción.</p>}
       {result?.instrumental && <p className="py-3 text-sm text-muted-foreground">Esta canción es instrumental.</p>}
-      {result && !result.instrumental && <div data-lyrics-viewport={scrollable ? "" : undefined} className={cn(scrollable && "max-h-72 overflow-y-auto overscroll-contain pr-2 [scrollbar-width:thin]", scrollable && preview && "max-h-80 [scrollbar-width:none]")}>{result.lines.length ? (
-        <div className={cn("flex flex-col", preview ? "gap-2" : "gap-3")}>
-          {result.lines.map((line, index) => line.text ? (
-            <button key={`${line.time}:${index}`} ref={index === active ? currentRef : undefined} type="button" aria-current={index === active ? "true" : undefined} aria-label={`Ir a ${Math.floor(line.time / 60)}:${String(Math.floor(line.time % 60)).padStart(2, "0")}`} onClick={() => usePlayer.getState().seek(line.time)} className={cn("rounded-sm py-1 text-left break-words transition-colors focus-visible:outline-2 focus-visible:outline-ring", preview ? "text-xl leading-snug font-bold" : "text-lg leading-relaxed font-semibold", index === active ? (preview ? "text-foreground" : "text-primary") : preview ? "text-foreground/40 hover:text-foreground/80" : "text-muted-foreground hover:text-foreground")}>
-              {line.text}
-            </button>
-          ) : <div key={`${line.time}:${index}`} className="h-3" aria-hidden />)}
+    </>
+  )
+  // `ghost`: the blurred copy painted inside the floating header (no focus, no ref, no clicks).
+  const renderLines = (ghost = false) => result && !result.instrumental ? (result.lines.length ? (
+    <div className={cn("flex flex-col", preview ? "gap-2" : "gap-3")}>
+      {result.lines.map((line, index) => line.text ? (
+        <button key={`${line.time}:${index}`} ref={!ghost && index === active ? currentRef : undefined} type="button" tabIndex={ghost ? -1 : undefined} aria-current={index === active ? "true" : undefined} aria-label={`Ir a ${Math.floor(line.time / 60)}:${String(Math.floor(line.time % 60)).padStart(2, "0")}`} onClick={ghost ? undefined : () => usePlayer.getState().seek(line.time)} className={cn("rounded-sm py-1 text-left break-words transition-colors focus-visible:outline-2 focus-visible:outline-ring", preview ? "text-xl leading-snug font-bold" : "text-lg leading-relaxed font-semibold", index === active ? (preview ? "text-foreground" : "text-primary") : preview ? "text-foreground/40 hover:text-foreground/80" : "text-muted-foreground hover:text-foreground")}>
+          {line.text}
+        </button>
+      ) : <div key={`${line.time}:${index}`} className="h-3" aria-hidden />)}
+    </div>
+  ) : <p className="text-base leading-relaxed whitespace-pre-line text-foreground/85">{result.text}</p>) : null
+  const lines = renderLines()
+
+  // The blurred copy follows the real scroll position (set imperatively: no re-render per scroll frame).
+  const syncGhost = () => {
+    const ghost = ghostRef.current, viewport = viewportRef.current
+    if (ghost && viewport) ghost.style.transform = `translateY(${(headRef.current?.offsetHeight ?? 0) - viewport.scrollTop}px)`
+  }
+  useLayoutEffect(syncGhost)
+
+  // Preview cards: the lines scroll under a translucent header with the player bar's blur. backdrop-filter does not
+  // reach this nested scroller inside the masked full-player scroll area, so the header paints its own blurred copy
+  // of the lines (kept in sync with the scroll) while the real lines melt away under it: same look everywhere.
+  if (floatingHead) return (
+    <section aria-label="Letras" className="relative min-w-0" style={{ "--lyrics-head": `${headHeight}px` } as CSSProperties}>
+      <div ref={headRef} data-lyrics-head="" className={cn("absolute inset-x-0 top-0 z-10 !pb-3", className)}>
+        <div aria-hidden className="lyrics-head-glass pointer-events-none absolute inset-x-0 top-0 -bottom-6 overflow-hidden">
+          {lines && (
+            <div className="absolute inset-0 overflow-hidden blur-[24px] saturate-[1.4]">
+              <div ref={ghostRef} inert className={cn("!pt-1 will-change-transform", className)}>{body}{renderLines(true)}</div>
+            </div>
+          )}
         </div>
-      ) : <p className="text-base leading-relaxed whitespace-pre-line text-foreground/85">{result.text}</p>}</div>}
+        <div className="relative">{header}</div>
+      </div>
+      <div ref={viewportRef} data-lyrics-viewport="" onScroll={syncGhost} className="lyrics-under-head max-h-96 overflow-y-auto overscroll-contain [scrollbar-width:none]">
+        <div className={cn("!pt-1", className)} style={{ marginTop: headHeight }}>{body}{lines}</div>
+      </div>
+    </section>
+  )
+
+  return (
+    <section aria-label="Letras" className={cn("min-w-0 px-4 py-5", className)}>
+      <div className="mb-4">{header}</div>
+      {body}
+      {lines && <div data-lyrics-viewport={scrollable ? "" : undefined} className={cn(scrollable && "max-h-72 overflow-y-auto overscroll-contain pr-2 [scrollbar-width:thin]")}>{lines}</div>}
     </section>
   )
 }

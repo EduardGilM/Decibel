@@ -10,12 +10,12 @@ import type { Track } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { usePlayer } from "@/stores/player"
 import { usePrepareTrack } from "@/hooks/use-prepare-track"
-import { useSession } from "@/stores/session"
-import { searchScope, useSearch } from "@/stores/search"
+import { useSearch } from "@/stores/search"
+import { recentScope } from "@/lib/profile/search-sync"
 import { Cover } from "./cover"
 import { TrackSaveButtons } from "./track-save-buttons"
 import { hrefAlbum } from "./media-card"
-import { TrackActions } from "./track-actions"
+import { TrackActions, useTrackContextMenu } from "./track-actions"
 import { SwipeToQueue } from "./swipe-to-queue"
 import { ArtistLinks } from "./artist-links"
 
@@ -25,15 +25,17 @@ export function TrackList({ tracks, label, showCover = true, showAlbum = true, n
   const isPlaying = usePlayer((s) => s.isPlaying)
   const sourceLabel = usePlayer((s) => s.sourceLabel)
   const { prepare, cancel } = usePrepareTrack(singleTrack ? tracks[0] : undefined)
+  const contextMenu = useTrackContextMenu()
   function playTrack(track: Track, index: number) {
     if (label?.startsWith("search:")) {
-      const { mode, creds, ytdlpUrl } = useSession.getState()
-      useSearch.getState().remember(searchScope(mode, mode === "subsonic" ? creds?.serverUrl : ytdlpUrl, creds?.username), track)
+      useSearch.getState().remember(recentScope().scope, track)
     }
     usePlayer.getState().playList(singleTrack ? [track] : tracks, singleTrack ? 0 : index, label)
   }
 
   return (
+    <>
+    {contextMenu.menu}
     <Table className="table-fixed">
       <TableHeader className="hidden md:table-header-group">
         <TableRow className="text-muted-foreground hover:bg-transparent">
@@ -60,6 +62,7 @@ export function TrackList({ tracks, label, showCover = true, showAlbum = true, n
               onPointerLeave={cancel}
               onPointerDown={() => prepare(t, true)}
               onFocus={() => prepare(t)}
+              onContextMenu={contextMenu.onContextMenu(t)}
               onClick={() => {
                 if (active) usePlayer.getState().toggle()
                 else playTrack(t, i)
@@ -112,6 +115,7 @@ export function TrackList({ tracks, label, showCover = true, showAlbum = true, n
         })}
       </TableBody>
     </Table>
+    </>
   )
 }
 

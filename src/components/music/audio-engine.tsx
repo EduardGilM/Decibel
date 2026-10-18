@@ -7,6 +7,7 @@ import { usePlayer } from "@/stores/player"
 import { notePause } from "@/lib/pause-log"
 import { useSettings } from "@/stores/settings"
 import { armWindow, fadeGains, isIOS, nextAutoTrack } from "@/lib/audio/transition"
+import { advanced, PlaybackWatchdog, type WatchdogAction } from "@/lib/audio/watchdog"
 import { measureLoudness, trackGain, useGainKey } from "./normalization"
 import { useKeyboardShortcuts } from "./keyboard-shortcuts"
 import { useListenTracker } from "./use-listen-tracker"
@@ -55,7 +56,8 @@ export function AudioEngine() {
   const ready = useRef(false)
   const failed = useRef(false)
   const refreshUrl = useRef(false)
-  const autoRetried = useRef(false)
+  const watchdog = useRef(new PlaybackWatchdog())
+  const resumeAt = useRef(0)
   const crossfade = useSettings((s) => s.crossfade)
   const gapless = useSettings((s) => s.gapless)
   const normalize = useSettings((s) => s.normalize)
@@ -127,9 +129,49 @@ export function AudioEngine() {
   }, [provider])
 
   useEffect(() => {
-    autoRetried.current = false
     refreshUrl.current = false
+    resumeAt.current = 0
   }, [track, provider, playbackId])
+
+  /** Snapshot for the watchdog: one key per playback, position of the active deck. */
+  const watchdogSample = () => {
+    const s = usePlayer.getState(), t = s.queue[s.index]
+    return { now: performance.now(), key: `${s.playbackId}:${t?.id ?? ""}`, wantsPlaying: s.isPlaying && !s.loadingRecommendations, position: ref.current?.currentTime ?? 0, resolved: ready.current }
+  }
+
+  /** Carry out a watchdog decision: reload the same song (resuming where it was) or move on with a quiet toast. */
+  const recover = (action: WatchdogAction) => {
+    if (!action) return
+    if (action.type === "retry") {
+      ready.current = false
+      failed.current = false
+      refreshUrl.current = action.refresh
+      resumeAt.current = action.resumeAt
+      usePlayer.setState({ buffering: true })
+      setRetry((value) => value + 1)
+      return
+    }
+    const state = usePlayer.getState(), stuck = state.queue[state.index]
+    void state.next()
+    if (advanced(state, usePlayer.getState())) {
+      toast(stuck ? `«${stuck.title}» no carga. Pasando a la siguiente.` : "Pasando a la siguiente.", { duration: 2500 })
+      return
+    }
+    // Nothing after it: stop instead of spinning; pressing play tries again from scratch.
+    failed.current = true
+    usePlayer.getState().setPlaying(false)
+    usePlayer.setState({ buffering: false })
+    toast(stuck ? `«${stuck.title}» no carga.` : "No se pudo cargar la canción.", { duration: 2500 })
+  }
+
+  // Watchdog: if the active deck makes no progress for ~12 s while it should be playing, retry and then skip.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (!ref.current || !usePlayer.getState().queue.length) return
+      recover(watchdog.current.sample(watchdogSample()))
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   // load track
   useEffect(() => {
@@ -169,6 +211,13 @@ export function AudioEngine() {
         if (cancelled) return
         ready.current = true
         a.src = url
+        const at = resumeAt.current
+        resumeAt.current = 0
+        if (at > 1) {
+          // Retry after a stall: continue where it stopped once the new source knows its length.
+          a.addEventListener("loadedmetadata", () => { if (!cancelled && ref.current === a) a.currentTime = Math.min(at, isFinite(a.duration) ? Math.max(0, a.duration - 1) : at) }, { once: true })
+          usePlayer.setState({ position: at })
+        }
         if (usePlayer.getState().isPlaying) a.play().catch((error: DOMException) => {
           if (!cancelled && !["AbortError", "NotSupportedError"].includes(error.name)) usePlayer.getState().setPlaying(false)
         })
@@ -361,19 +410,10 @@ export function AudioEngine() {
           if (armed.current?.deck === e.currentTarget) armed.current = null
           return
         }
-        if (!ready.current) return
-        ready.current = false
-        if (provider.kind === "ytdlp" && !autoRetried.current) {
-          autoRetried.current = true
-          refreshUrl.current = true
-          usePlayer.setState({ buffering: true })
-          setRetry((value) => value + 1)
-          return
-        }
-        failed.current = true
-        if (usePlayer.getState().queue.length) toast.error("Error al reproducir la pista")
-        usePlayer.getState().setPlaying(false)
-        usePlayer.setState({ buffering: false })
+        if (!ready.current || !e.currentTarget.getAttribute("src")) return
+        if (!usePlayer.getState().queue.length) return
+        // Fresh URL (expired signature, dropped connection…) once or twice, then on to the next song.
+        recover(watchdog.current.fail({ ...watchdogSample(), resolved: true }))
       }}
     />
   )

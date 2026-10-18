@@ -21,6 +21,8 @@ import { ProfileAvatar } from "@/components/profile/profile-avatar"
 import { PasswordDialog } from "@/components/profile/password-dialog"
 import { resetForProfile } from "@/lib/profile/sync"
 import { useProfile } from "@/stores/profile"
+import { glassClasses } from "@/components/ui/glass-shape"
+import { cn } from "@/lib/utils"
 
 export function AccountMenu({ className }: { className?: string }) {
   const router = useRouter()
@@ -28,7 +30,6 @@ export function AccountMenu({ className }: { className?: string }) {
   const creds = useSession((s) => s.creds)
   const logout = useSession((s) => s.logout)
   const [themes, setThemes] = useState(false)
-  const musicUrl = useSession((s) => s.ytdlpUrl)
   const profile = useProfile((s) => (s.status === "unavailable" ? null : s.user))
   const [password, setPassword] = useState(false)
   const sourceName = mode === "subsonic" ? creds?.username ?? "?" : mode === "ytdlp" ? "YouTube" : "Demo"
@@ -47,11 +48,8 @@ export function AccountMenu({ className }: { className?: string }) {
             )}
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-64">
-          <DropdownMenuLabel className="flex flex-col gap-0.5">
-            <span className="text-sm font-medium">{name}</span>
-            <span className="truncate text-xs font-normal text-muted-foreground">{mode === "subsonic" ? `${creds?.username} · ${creds?.serverUrl}` : mode === "ytdlp" ? musicUrl || "YouTube Music" : "Modo demo (datos de prueba)"}</span>
-          </DropdownMenuLabel>
+        <DropdownMenuContent align="end" className={cn("w-64", glassClasses.player)}>
+          <DropdownMenuLabel className="truncate text-sm font-medium">{name}</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => setThemes(true)}>
             <Palette /> Temas

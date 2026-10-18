@@ -2,27 +2,58 @@
 
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
-import type { DataSource, SearchFilter, Track } from "@/lib/types"
+import { applyRecent, MAX_RECENT, recentItem, type RecentOp, type RecentRow } from "../lib/recent-searches.ts"
+import type { DataSource, SearchFilter, Track } from "../lib/types"
 
-/** Shared state for the top-bar search input (survives page navigations). */
+/**
+ * Shared state for the top-bar search input (survives page navigations) and the recent searches.
+ * `rows` is the local copy per scope (shown at once); `queue` holds the changes not yet confirmed by the
+ * server (sent by lib/profile/search-sync when a profile is signed in, also after being offline).
+ */
 interface SearchState {
   q: string
   /** set right before navigating so the next page's input regains focus */
   refocus: boolean
   setQ: (q: string) => void
   setRefocus: (v: boolean) => void
+  /** Before 0.1.10: recent songs per scope, only on this device (migrated once to the profile). */
   recent: Record<string, Track[]>
+  rows: Record<string, RecentRow[]>
+  queue: Record<string, RecentOp[]>
+  seq: number
   remember: (scope: string, track: Track) => void
   forget: (scope: string, id: string) => void
+  clearRecent: (scope: string) => void
+  /** The server's list after sending `sent` (those leave the queue); what is still queued stays applied. */
+  confirm: (scope: string, rows: RecentRow[], sent: number[]) => void
 }
 
-export const useSearch = create<SearchState>()(persist((set) => ({
-  q: "", refocus: false, recent: {},
-  setQ: (q) => set({ q }),
-  setRefocus: (refocus) => set({ refocus }),
-  remember: (scope, track) => set((state) => ({ recent: { ...state.recent, [scope]: [track, ...(state.recent[scope] || []).filter((item) => item.id !== track.id)].slice(0, 12) } })),
-  forget: (scope, id) => set((state) => ({ recent: { ...state.recent, [scope]: (state.recent[scope] || []).filter((track) => track.id !== id) } })),
-}), { name: "decibel-search", partialize: (state) => ({ recent: state.recent }) }))
+const MAX_QUEUE = 200
+
+export const useSearch = create<SearchState>()(persist((set) => {
+  const push = (scope: string, make: (n: number, at: number) => RecentOp) => set((state) => {
+    const op = make(state.seq + 1, Date.now())
+    // First change on a device that only had the old local list: start from it.
+    const base = state.rows[scope] ?? (state.recent[scope] ?? []).map((item, index): RecentRow => ({ kind: "track", item, at: op.at - index - 1 }))
+    return {
+      seq: state.seq + 1,
+      rows: { ...state.rows, [scope]: applyRecent(base, [op]) },
+      queue: { ...state.queue, [scope]: [...(state.queue[scope] ?? []), op].slice(-MAX_QUEUE) },
+    }
+  })
+  return {
+    q: "", refocus: false, recent: {}, rows: {}, queue: {}, seq: 0,
+    setQ: (q) => set({ q }),
+    setRefocus: (refocus) => set({ refocus }),
+    remember: (scope, track) => push(scope, (n, at) => ({ n, op: "add", kind: "track", item: recentItem(track), at })),
+    forget: (scope, id) => push(scope, (n, at) => ({ n, op: "remove", kind: "track", id, at })),
+    clearRecent: (scope) => push(scope, (n, at) => ({ n, op: "clear", at })),
+    confirm: (scope, rows, sent) => set((state) => {
+      const queue = (state.queue[scope] ?? []).filter((op) => !sent.includes(op.n))
+      return { rows: { ...state.rows, [scope]: applyRecent(rows, queue, MAX_RECENT) }, queue: { ...state.queue, [scope]: queue } }
+    }),
+  }
+}, { name: "decibel-search", version: 1, partialize: ({ recent, rows, queue, seq }) => ({ recent, rows, queue, seq }) }))
 
 export const searchScope = (source: DataSource | null, server = "", username = "") => JSON.stringify([source, source === "mock" ? "" : server.replace(/\/+$/, ""), source === "subsonic" ? username : ""])
 

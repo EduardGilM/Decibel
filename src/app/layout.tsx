@@ -42,7 +42,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         {/* Last status-bar height injected by the Android shell, so the first paint already leaves room for it. */}
         <script dangerouslySetInnerHTML={{ __html: `try{var t=localStorage.getItem("decibel-inset-top");if(t)document.documentElement.style.setProperty("--android-inset-top",t)}catch(e){}` }} />
       </head>
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+      <body className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased`}>
         <TooltipProvider delayDuration={400}>
           <AppShell>{children}</AppShell>
         </TooltipProvider>

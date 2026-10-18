@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { importLocalData, markImported, resetForProfile, stashHistory, useLocalImport, useProfileSync, type LocalData } from "@/lib/profile/sync"
+import { useRecentSearchSync } from "@/lib/profile/search-sync"
 import { useProfile } from "@/stores/profile"
 
 /** No session on this device: name + password only (profile names are not listed). Asked once per device. */
@@ -117,6 +118,7 @@ export function ProfileGate() {
   const check = useProfile((s) => s.check)
   const { data, dismiss } = useLocalImport()
   useProfileSync()
+  useRecentSearchSync()
 
   useEffect(() => { void check() }, [check])
   useEffect(() => {
