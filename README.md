@@ -36,7 +36,7 @@ It runs as a web app/PWA and as an Android app built with Tauri.
 - [Self-hosting in production](#self-hosting-in-production)
 - [Building the Android APK](#building-the-android-apk)
 - [Environment variables](#environment-variables)
-- [Development](#development)
+- [Development](#development) · [Changelog](CHANGELOG.md)
 - [Contributing](#contributing) · [Security](#security) · [Disclaimer](#disclaimer) · [License](#license)
 
 ## Features
@@ -49,16 +49,26 @@ It runs as a web app/PWA and as an Android app built with Tauri.
 - **Podcasts**: search, RSS feeds, follow shows, "continue listening" and top charts per country (Apple's public charts).
 - **Profiles**: login with long-lived sessions and an admin panel. Each profile has its own likes, history,
   playlists (private, shared with viewer/editor roles, or collaborative), settings and a yearly **Wrapped**.
-- **Player**: synced lyrics from [LRCLIB](https://lrclib.net), editable queue, shuffle/repeat, crossfade and
-  gapless playback, Media Session controls, clickable artist credits (each featured artist links to its page).
-- **Themes**, including a dynamic one that follows the album artwork.
-- **Platforms**: web, installable PWA and an Android app (Tauri v2) with a media notification and background
-  playback. Desktop and iOS builds through Tauri are possible but untested.
+- **Player**: synced lyrics from [LRCLIB](https://lrclib.net) with a translucent, blurred header over the lyrics
+  preview, editable queue, shuffle/repeat, crossfade and gapless playback, Media Session controls, clickable
+  artist credits (each featured artist links to its page). A playback watchdog retries a song that gets stuck
+  loading and skips it if it still fails.
+- **Queue**: swipe a song right to add it to the queue and left to remove it (touch, mouse drag or touchpad),
+  also from the «…» menu and right-click; an «A continuación» card in the desktop side panel, and swipe the mini
+  player to skip tracks.
+- **Recent searches** synced per profile across devices (local cache, offline queue).
+- **Themes**, including a dynamic one that derives the accent colour from the current artwork.
+- **Platforms**: web, installable PWA, an Android app and desktop apps for Windows and Linux (Tauri v2). Android
+  has a media notification and background playback; the desktop apps have an integrated title bar, and on
+  Windows taskbar thumbnail buttons (previous, play/pause, next, mute) and system media controls.
+- **Downloads and in-app updates** from your own server: a minimal `/download` page, and native apps that update
+  in place with a progress bar (signed Tauri updater on desktop, in-app APK download plus the system installer on
+  Android). See [docs/releases.md](docs/releases.md).
 
 ## Architecture
 
 ```
- Browser / PWA / Android (Tauri WebView)
+ Browser / PWA / Android and desktop apps (Tauri WebView)
         │  static Next.js export (React 19, zustand, Tailwind)
         ▼
  Node.js server (server/index.mjs) ── SQLite (node:sqlite): profiles, sessions, likes, history, playlists
@@ -73,7 +83,9 @@ It runs as a web app/PWA and as an Android app built with Tauri.
 - **Server**: a single Node.js process serves the static web app and the `/api/*` endpoints. No external database.
 - **Android**: the same web build packaged with Tauri v2, plus a small native layer
   ([src-tauri/android-overlay/](src-tauri/android-overlay/README.md)) for the media session, notification and
-  foreground playback service.
+  foreground playback service and in-app updates.
+- **Desktop**: the same web build in a Tauri v2 window without native decorations, with the signed Tauri updater
+  and, on Windows, taskbar buttons and system media controls (`src-tauri/src/win_media.rs`).
 
 ```
 src/app/*                  pages
@@ -84,6 +96,8 @@ server/index.mjs           HTTP server: static web app + API
 server/ytdlp.mjs           audio resolution and library
 server/ytmusic.{mjs,py}    YouTube Music catalogue bridge
 server/accounts.mjs        profiles, passwords (scrypt) and sessions
+server/releases.mjs        /download, /releases/* and /api/app/version
+scripts/build-desktop.mjs  desktop builds; scripts/release.mjs publishes releases
 server/podcast*.mjs        RSS, charts and safe artwork/audio proxy
 src-tauri/                 Tauri v2 project and Android native code (android-overlay/)
 deploy/systemd/            hardened systemd unit, installer and health check
@@ -136,7 +150,9 @@ Full guide: **[docs/self-hosting.md](docs/self-hosting.md)**. In short:
    sees a single IP.
 5. **First admin**: set `DECIBEL_ADMIN_USER`/`DECIBEL_ADMIN_PASSWORD` for the first start, or read the one-time
    random password from the log (`journalctl -u decibel`). Use long passwords: the login page is public.
-6. **Backups**: back up `DECIBEL_DB` (SQLite, use the online backup API or stop the service) and `MUSIC_DATA_DIR`.
+6. **Releases (optional)**: set `DECIBEL_RELEASES_DIR` to serve `/download`, the installers and the update
+   manifests; see [docs/releases.md](docs/releases.md).
+7. **Backups**: back up `DECIBEL_DB` (SQLite, use the online backup API or stop the service) and `MUSIC_DATA_DIR`.
 
 ## Building the Android APK
 
@@ -180,6 +196,9 @@ The APK is the web build packaged with Tauri v2 plus the native overlay. The def
    the same application id, so keep the keystore and its password safe.
 5. On the server, keep the Tauri origins in `YTDLP_ALLOWED_ORIGINS` (already in `.env.example`).
 
+Desktop apps (Windows NSIS, Linux AppImage and .deb), the updater keys and publishing releases are covered in
+[docs/releases.md](docs/releases.md).
+
 ## Environment variables
 
 Copy [.env.example](.env.example) to `.env.local`. `NEXT_PUBLIC_*` variables are baked in at build time; the rest
@@ -191,12 +210,14 @@ are read by the server at start-up.
 | `NEXT_PUBLIC_YTDLP_URL` | empty (same server) | Decibel server URL for the native app or a web app hosted elsewhere. |
 | `NEXT_PUBLIC_DECIBEL_SERVER` | empty | Fixed profile server. The app does not offer to switch source; meant for your own APK. |
 | `NEXT_PUBLIC_SUBSONIC_URL` | empty | URL pre-filled in the Navidrome/Subsonic login. |
+| `NEXT_PUBLIC_UPDATE_URL` | `NEXT_PUBLIC_DECIBEL_SERVER` | Server the native apps ask for updates. |
 | `MUSIC_HOST` / `MUSIC_PORT` | `0.0.0.0` / `3000` | Where the server listens. Behind a tunnel or proxy, use `127.0.0.1`. |
 | `MUSIC_API_PORT` | `3001` | Standalone API port (`npm run music:server`, used by `npm run dev`). |
 | `MUSIC_DATA_DIR` | `data/music` | Legacy library and metadata. |
 | `DECIBEL_DB` | `data/decibel.db` | SQLite database for profiles. |
 | `DECIBEL_ADMIN_USER` / `DECIBEL_ADMIN_PASSWORD` | `admin` / random | Only used on the first start, with an empty database. |
 | `DECIBEL_TRUST_PROXY` | `false` | `loopback` or a list of proxy IPs whose `X-Forwarded-Proto` and `CF-Connecting-IP` headers are trusted. Required behind an HTTPS proxy/tunnel. |
+| `DECIBEL_RELEASES_DIR` | unset | Directory served at `/download`, `/releases/*` and `/api/app/version`. |
 | `YTDLP_ALLOWED_ORIGINS` | Tauri origins | Extra CORS origins (exact scheme, host and port), comma-separated. |
 | `YTDLP_BIN`, `YTMUSIC_PYTHON`, `YTDLP_CACHE_DIR`, `PYTHON_BIN` | `.tools/…` | Alternative tool paths. |
 
