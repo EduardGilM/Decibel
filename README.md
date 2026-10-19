@@ -52,14 +52,22 @@ It runs as a web app/PWA and as an Android app built with Tauri.
 - **Player**: synced lyrics from [LRCLIB](https://lrclib.net) with a translucent, blurred header over the lyrics
   preview, editable queue, shuffle/repeat, crossfade and gapless playback, Media Session controls, clickable
   artist credits (each featured artist links to its page). A playback watchdog retries a song that gets stuck
-  loading and skips it if it still fails.
+  loading, stalls or only trickles in (a throttled stream), resuming where it stopped with a fresh audio URL, and
+  skips it if it still fails. Lyrics prefer synced matches, are cached on the device and refreshed when stale.
 - **Queue**: swipe a song right to add it to the queue and left to remove it (touch, mouse drag or touchpad),
   also from the «…» menu and right-click; an «A continuación» card in the desktop side panel, and swipe the mini
   player to skip tracks.
 - **Recent searches** synced per profile across devices (local cache, offline queue).
+- **Devices**: pick where the music plays among the devices open with the same profile (Spotify Connect style);
+  song, position and queue move along, and the others become remotes. Likes and playlists also sync across
+  devices automatically. See [docs/devices.md](docs/devices.md).
+- **Import from Spotify**: a public playlist by link, or the whole library (likes and playlists) from an
+  [Exportify](https://exportify.app) ZIP or, optionally, with a Spotify app on the server. Songs are matched on
+  YouTube Music in the background. See [docs/spotify-import.md](docs/spotify-import.md).
 - **Themes**, including a dynamic one that derives the accent colour from the current artwork.
 - **Platforms**: web, installable PWA, an Android app and desktop apps for Windows and Linux (Tauri v2). Android
-  has a media notification and background playback; the desktop apps have an integrated title bar, and on
+  has a media notification, background playback and **Android Auto** (browse the queue, likes and playlists,
+  voice search); the desktop apps have an integrated title bar, and on
   Windows taskbar thumbnail buttons (previous, play/pause, next, mute) and system media controls.
 - **Downloads and in-app updates** from your own server: a minimal `/download` page, and native apps that update
   in place with a progress bar (signed Tauri updater on desktop, in-app APK download plus the system installer on
@@ -99,11 +107,15 @@ server/accounts.mjs        profiles, passwords (scrypt) and sessions
 server/releases.mjs        /download, /releases/* and /api/app/version
 scripts/build-desktop.mjs  desktop builds; scripts/release.mjs publishes releases
 server/podcast*.mjs        RSS, charts and safe artwork/audio proxy
+server/devices.mjs         per-profile playback devices (in memory)
+server/spotify*.mjs        Spotify imports (playlist link, Exportify/data files, optional OAuth)
 src-tauri/                 Tauri v2 project and Android native code (android-overlay/)
 deploy/systemd/            hardened systemd unit, installer and health check
 ```
 
-More details: [docs/self-hosting.md](docs/self-hosting.md) and [docs/profiles.md](docs/profiles.md) (profiles, sessions and API).
+More details: [docs/self-hosting.md](docs/self-hosting.md), [docs/profiles.md](docs/profiles.md) (profiles, sessions and
+API), [docs/devices.md](docs/devices.md), [docs/spotify-import.md](docs/spotify-import.md) and
+[docs/releases.md](docs/releases.md).
 
 ## Requirements
 
@@ -196,7 +208,7 @@ The APK is the web build packaged with Tauri v2 plus the native overlay. The def
    the same application id, so keep the keystore and its password safe.
 5. On the server, keep the Tauri origins in `YTDLP_ALLOWED_ORIGINS` (already in `.env.example`).
 
-Desktop apps (Windows NSIS, Linux AppImage and .deb), the updater keys and publishing releases are covered in
+Desktop apps (Windows NSIS and Linux .deb), the updater keys and publishing releases are covered in
 [docs/releases.md](docs/releases.md).
 
 ## Environment variables
@@ -248,7 +260,7 @@ privately and for an overview of the security model.
 
 ## Disclaimer
 
-Decibel does not host or distribute any content and is not affiliated with YouTube, Google, Apple or Cloudflare.
+Decibel does not host or distribute any content and is not affiliated with YouTube, Google, Apple, Spotify or Cloudflare.
 Use it for personal, private purposes and comply with the terms of the services you connect. See
 [DISCLAIMER.md](DISCLAIMER.md).
 

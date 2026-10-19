@@ -45,5 +45,42 @@ The icons (adaptive launcher with transparent background and monochrome layer, l
 - `MediaPlaybackService.kt`: `mediaPlayback` foreground service with a MediaStyle notification (cover,
   title, artist, previous/play-pause/next or −15/+30 s, progress bar on Android 13+).
 - `patch-manifest.py`: adds the FOREGROUND_SERVICE(_MEDIA_PLAYBACK), POST_NOTIFICATIONS, WAKE_LOCK and
-  REQUEST_INSTALL_PACKAGES permissions and the `<service>` entry.
+  REQUEST_INSTALL_PACKAGES permissions, the `<service>` entries and, for Android Auto, the browser service and
+  `res/xml/automotive_app_desc.xml`. It also works on an already generated project.
 - Web side: `src/components/music/native-media-bridge.tsx`.
+
+## Android Auto (bridge 7)
+
+Decibel shows up as a music app in Android Auto. The car draws its standard interface with the queue, likes and
+playlists, play/pause, previous/next and voice search. Long collections are split into pages of 80 songs; picking
+a song plays its whole collection. Queries go through the phone's provider and session, also for private likes and
+playlists. No credentials or second library are stored in the service.
+
+Before driving, open Decibel on the phone and log in, then connect Android Auto and choose Decibel in its launcher.
+There is no extra switch in the app. If the APK was installed outside Google Play and does not appear, enable
+«Unknown sources» in **Android Auto's** developer settings (not the phone's permission to install APKs).
+
+**Current limit:** audio still depends on the WebView. Android Auto can discover the service with the app closed,
+but then shows «Abre Decibel en el teléfono antes de conducir» and does not start the player without the app. If
+Android kills the process, open the app again. This is Android Auto projected from the phone, not a standalone app
+for Android Automotive OS.
+
+- `AutoBrowserService`, in `MediaPlaybackService.kt`, shares the MediaSession with the notification controls. It
+  only accepts its own UID, controllers authorised by Android and Google hosts whose signature matches Google Play
+  Services, always checking that package and UID belong together. The playback service stays private.
+- The browser asks the bridge for data asynchronously with a 12-second limit; late answers, replaced selections
+  and requests from an earlier session cannot start audio. Pause and stop cancel a pending selection, even right
+  after pressing play.
+- `src/lib/android-auto.ts` defines the collections, paging and selection by identity; its tests are in
+  `tests/android-auto.test.mjs` and use mocked data, without music extraction.
+
+Before distributing, besides the tests and the Kotlin build, check on Android Auto's Desktop Head Unit or in a car
+with a test profile:
+
+1. App closed → message to open it; open it and log in → library available.
+2. Likes and a playlist with more than 80 songs → full pages, correct selection and next.
+3. Edit the queue on the phone → the car updates; an old selection never plays another song.
+4. Voice search, a search without results and a lost network → an answer or a recoverable error.
+5. Immediate pause, screen off, car disconnect/reconnect and logging out during a load.
+
+The build and the automated tests do not replace this check on a real Android Auto head unit.

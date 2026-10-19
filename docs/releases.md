@@ -42,7 +42,7 @@ and the format and paths of `latest.json`, `releases.json` and `/api/app/version
 ## Building the desktop apps
 
 ```bash
-# Linux AppImage + .deb and Windows NSIS (cross-compiled with cargo-xwin)
+# Linux .deb and Windows NSIS (cross-compiled with cargo-xwin)
 DECIBEL_SERVER=https://music.example.com \
 DECIBEL_UPDATER_PUBKEY=/path/to/updater.key.pub \
 node scripts/build-desktop.mjs [--linux] [--windows] [--skip-web]
@@ -53,7 +53,8 @@ node scripts/build-desktop.mjs [--linux] [--windows] [--skip-web]
   `src-tauri/tauri.desktop.json`; without a key the app is built without self-update.
 - Windows is built from Linux with `cargo install cargo-xwin`, `rustup target add x86_64-pc-windows-msvc`, plus
   `nsis`, `lld` and `llvm`. The installer has no Authenticode signature, so SmartScreen shows a warning.
-- The AppImage bundles GStreamer; the `.deb` depends on the system `gstreamer1.0-plugins-*` packages.
+- Linux is published as a `.deb` only (it depends on the system `gstreamer1.0-plugins-*` packages). AppImage
+  builds are no longer published; `/download` offers the `.deb` on Linux.
 - On Windows the app adds taskbar thumbnail buttons (previous, play/pause, next, mute) and system media controls.
 
 Updater key pair (once), stored outside the repository:
@@ -73,7 +74,7 @@ DECIBEL_PUBLIC_URL=https://music.example.com \
 DECIBEL_RELEASE_TARGET=myserver:/srv/decibel-releases \
 node scripts/release.mjs --version 1.2.3 \
   --apk Decibel.apk --windows Decibel_1.2.3_x64-setup.exe \
-  --appimage Decibel_1.2.3_amd64.AppImage --deb Decibel_1.2.3_amd64.deb \
+  --deb Decibel_1.2.3_amd64.deb \
   --notes "What's new" --publish
 ```
 
@@ -83,7 +84,9 @@ The script:
 2. Signs the desktop installers (`DECIBEL_UPDATER_KEY`, default `~/.decibel-keys/updater.key`, with its
    `.password` file) and **verifies every signature** against the public key (`DECIBEL_UPDATER_PUBKEY`, default
    `<key>.pub`) with `scripts/updater-signature.mjs`, the same check the apps make.
-3. Writes `releases.json`, the signed `latest.json` and `SHA256SUMS.txt`. URLs carry `?v=<hash>` so a CDN in
+3. Writes `releases.json`, the signed `latest.json` (platform keys `windows-x86_64(-nsis)` and
+   `linux-x86_64-deb`; `linux-x86_64` is deliberately not mapped, so an old AppImage install never replaces
+   itself with a `.deb`) and `SHA256SUMS.txt`. URLs carry `?v=<hash>` so a CDN in
    front of the server never serves an older build.
 4. Uploads the installers first and then the manifests, renamed into place atomically.
 5. Downloads every served file to check its sha256, and checks `/api/app/version`.

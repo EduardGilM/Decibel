@@ -2,6 +2,37 @@
 
 All notable changes to Decibel. Versions follow the app version in `src-tauri/tauri.conf.json`.
 
+## 0.1.20
+
+Covers 0.1.13 to 0.1.20.
+
+### Added
+- **Playback devices**: choose where the music plays among the devices open with the same profile; song,
+  position and queue move along and the other devices act as remotes. See [docs/devices.md](docs/devices.md).
+- **Library sync across devices**: likes and playlists refresh automatically when another device or an import
+  changes them (`/api/me/revision`).
+- **Import from Spotify**: a public playlist by link (Tu biblioteca → «Importar lista por enlace»), or the whole
+  library from an Exportify ZIP or Spotify's data download, or with an optional Spotify app on the server (OAuth
+  PKCE). Imports run in the background with a small progress notice. See
+  [docs/spotify-import.md](docs/spotify-import.md).
+- **Android Auto**: browse the queue, likes and playlists, playback controls and voice search.
+- The native apps notice a new release while they stay open, not only at start-up.
+
+### Changed
+- Linux desktop builds are published as `.deb` only; AppImage is no longer built and `/download` offers the `.deb`.
+- Lyrics prefer synced matches, are cached on the device and are refreshed when stale (unsynced after ten
+  minutes, synced and instrumental after six hours).
+- With no device selected, a playback control makes the current device take over.
+
+### Fixed
+- Playback that stopped for good when the audio stream was throttled: the watchdog now requires real progress, so
+  a stream that only trickles in is retried with a fresh URL from the same position, then skipped.
+- Pressing Enter right after typing a search no longer fails with «varias consultas en curso»: aborted lookups free
+  their slot and searches wait in a bounded queue.
+- Recent searches saved by 0.1.9 are kept and reach the profile.
+- The «A continuación» card is back under the lyrics preview on desktop; rounded corners on the lyrics cards.
+- The real yt-dlp extraction test only runs with `DECIBEL_REAL_YTDLP=1`.
+
 ## 0.1.12
 
 ### Added
