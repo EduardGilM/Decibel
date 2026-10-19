@@ -109,6 +109,7 @@ object DecibelMedia {
   fun release() {
     active = false
     setPlaying(false)
+    watchInterruptions(false)
     trackId = ""; title = ""; artist = ""; album = ""; art = null
     positionMs = 0; durationMs = 0
     publish()
@@ -281,6 +282,7 @@ object DecibelMedia {
       .put("permission", permissionState())
       .put("sdk", Build.VERSION.SDK_INT)
       .put("focus", "webview")
+      .put("interrupted", interrupted)
       .put("pauses", pauseLog())
       .toString()
   }
@@ -462,6 +464,7 @@ object DecibelMedia {
     playing = value
     if (value) {
       playingSince = SystemClock.elapsedRealtime()
+      watchInterruptions(true)
       MediaPlaybackService.start(app)
       acquireLocks()
       registerNoisy(true)
@@ -576,6 +579,59 @@ object DecibelMedia {
   // made the WebView lose it (Chromium paused the <audio>), and pressing play again made the WebView take it back
   // and our listener lose it (we sent "pause"): play → pause almost at once, every time. 0.1.6: a single owner
   // (the WebView); no AudioRecordingCallback either (recorders that matter request focus themselves).
+
+  // ---- interruptions: calls, voice notes, other apps recording ------------------------------------------
+  // Observed without holding audio focus (see above): another app recording (AudioRecordingCallback, API 24+)
+  // or the phone in a call / VoIP call / ringing (OnModeChangedListener, API 31+). JS gets
+  // "interrupt" 1 when one begins and 0 when all have ended; it fades the music out and pauses, then fades it back
+  // in, unless the user changed something meanwhile (src/lib/audio/interruption.ts).
+  private var interrupted = false
+  private var recording = false
+  private var inCall = false
+  private var watching = false
+  private val audioManager by lazy { app.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
+  private val recordings = object : AudioManager.AudioRecordingCallback() {
+    override fun onRecordingConfigChanged(configs: MutableList<android.media.AudioRecordingConfiguration>?) {
+      recording = !configs.isNullOrEmpty()
+      interruptionChanged("recording")
+    }
+  }
+  private val modeListener: Any? = if (Build.VERSION.SDK_INT >= 31) AudioManager.OnModeChangedListener { mode ->
+    inCall = mode == AudioManager.MODE_IN_CALL || mode == AudioManager.MODE_IN_COMMUNICATION || mode == AudioManager.MODE_RINGTONE ||
+      (Build.VERSION.SDK_INT >= 33 && mode == AudioManager.MODE_CALL_SCREENING)
+    interruptionChanged("call")
+  } else null
+
+  private fun interruptionChanged(cause: String) {
+    val now = recording || inCall
+    if (now == interrupted) return
+    interrupted = now
+    Log.i(TAG, "interruption ${if (now) "begins" else "ends"} ($cause)")
+    if (now) notePause("recording", if (cause == "call") "llamada" else "otra app está grabando (nota de voz…)")
+    command("interrupt", if (now) 1.0 else 0.0)
+  }
+
+  /** Watch while there is a session (playing or paused by an interruption), so the end is seen too. */
+  private fun watchInterruptions(on: Boolean) {
+    if (on == watching || !::app.isInitialized) return
+    watching = on
+    try {
+      if (on) {
+        audioManager.registerAudioRecordingCallback(recordings, main)
+        recording = audioManager.activeRecordingConfigurations.isNotEmpty()
+        if (Build.VERSION.SDK_INT >= 31) {
+          audioManager.addOnModeChangedListener({ main.post(it) }, modeListener as AudioManager.OnModeChangedListener)
+          val mode = audioManager.mode
+          inCall = mode == AudioManager.MODE_IN_CALL || mode == AudioManager.MODE_IN_COMMUNICATION || mode == AudioManager.MODE_RINGTONE
+        }
+        interrupted = recording || inCall
+      } else {
+        audioManager.unregisterAudioRecordingCallback(recordings)
+        if (Build.VERSION.SDK_INT >= 31) audioManager.removeOnModeChangedListener(modeListener as AudioManager.OnModeChangedListener)
+        recording = false; inCall = false; interrupted = false
+      }
+    } catch (e: Exception) { Log.w(TAG, "interruptions", e) }
+  }
 
   // ---- pause causes (diagnostics) -------------------------------------------------------------------
   private val pauses = ArrayDeque<JSONObject>()

@@ -10,8 +10,16 @@ import { armWindow, fadeGains, isIOS, nextAutoTrack } from "@/lib/audio/transiti
 import { advanced, PlaybackWatchdog, type WatchdogAction } from "@/lib/audio/watchdog"
 import { measureLoudness, trackGain, useGainKey } from "./normalization"
 import { useDevices } from "@/stores/devices"
+import { interruption } from "./interruption-controller"
 import { useListenTracker } from "./use-listen-tracker"
 import type { Track } from "@/lib/types"
+
+/**
+ * Phones have no volume slider: the system volume keys own loudness, so the app always plays at full scale there
+ * (an old or another device's in-app volume, e.g. 0.3 from the computer, made the phone quiet at max volume).
+ */
+const phone = typeof navigator !== "undefined" && /Android|iPhone|iPad/i.test(navigator.userAgent)
+export const outputVolume = (volume: number) => (phone ? 1 : volume)
 import { prepareQueuedTracks, upcomingTracks } from "@/lib/prepare-queue"
 import { useAuthenticatedArtwork } from "@/hooks/use-authenticated-artwork"
 import { SKIP_BACK, SKIP_FORWARD, skipBy, usePodcastSession } from "@/components/podcast/podcast-playback"
@@ -73,6 +81,8 @@ export function AudioEngine() {
   const settled = useSettled(buffering, `${playbackId}:${track?.id ?? ""}:${retry}`)
   const ready = useRef(false)
   const failed = useRef(false)
+  /** Songs skipped in a row because their audio could not be resolved (stops a skip chain when offline). */
+  const skipped = useRef(0)
   const refreshUrl = useRef(false)
   const watchdog = useRef(new PlaybackWatchdog())
   const resumeAt = useRef(0)
@@ -88,7 +98,7 @@ export function AudioEngine() {
   usePodcastSession()
 
   const otherDeck = () => (ref.current === decks.current[0] ? decks.current[1] : decks.current[0])
-  const baseVolume = (t: Track | undefined) => Math.min(1, usePlayer.getState().volume * trackGain(t))
+  const baseVolume = (t: Track | undefined) => Math.min(1, outputVolume(usePlayer.getState().volume) * trackGain(t))
 
   /** End any crossfade now: silence the outgoing deck, settle the incoming one at its normal volume. */
   const finishFade = () => {
@@ -232,6 +242,7 @@ export function AudioEngine() {
       .then((url) => {
         if (cancelled) return
         ready.current = true
+        skipped.current = 0
         a.src = url
         const at = resumeAt.current
         resumeAt.current = 0
@@ -250,6 +261,14 @@ export function AudioEngine() {
       })
       .catch((e: Error) => {
         if (cancelled) return
+        const state = usePlayer.getState()
+        // Like a stuck stream: after the provider's own retries, move on instead of stopping the music.
+        if (state.isPlaying && navigator.onLine !== false && skipped.current < 3 && nextAutoTrack(state.queue, state.index, state.repeat === "one" ? "off" : state.repeat)) {
+          skipped.current++
+          toast(`No se pudo reproducir «${track.title}». Pasamos a la siguiente.`, { description: e.message })
+          void state.next()
+          return
+        }
         failed.current = true
         usePlayer.getState().setPlaying(false)
         usePlayer.setState({ buffering: false })
@@ -278,7 +297,7 @@ export function AudioEngine() {
 
   useEffect(() => {
     for (const d of decks.current) if (d) d.muted = muted
-    if (ref.current && !fade.current) ref.current.volume = Math.min(1, volume * trackGain(track))
+    if (ref.current && !fade.current) ref.current.volume = Math.min(1, outputVolume(volume) * trackGain(track))
   }, [volume, muted, track, gainKey])
 
   // Preload the song that auto-advance will pick on the idle deck, shortly before the end.
@@ -411,8 +430,11 @@ export function AudioEngine() {
         if (!useDevices.getState().localPlayback) return
         if (!(live(e.currentTarget) && ready.current && e.currentTarget.paused && !e.currentTarget.ended)) return
         // The store still says "playing": the WebView paused the element itself (audio focus lost to a call, another app, the assistant…)
-        if (usePlayer.getState().isPlaying) notePause("focus", "el sistema pausó el audio (otra app, llamada o asistente)")
-        usePlayer.getState().setPlaying(false)
+        if (usePlayer.getState().isPlaying) {
+          notePause("focus", "el sistema pausó el audio (otra app, llamada o asistente)")
+          // May be the start of a call or a voice note: then it resumes when that ends.
+          interruption.systemPaused(() => usePlayer.getState().setPlaying(false))
+        } else usePlayer.getState().setPlaying(false)
       }}
       onEnded={(e) => {
         if (!live(e.currentTarget)) return
@@ -425,7 +447,7 @@ export function AudioEngine() {
         if (take && upcoming?.track.id === take.trackId) {
           armed.current = null
           take.deck.currentTime = 0
-          take.deck.volume = Math.min(1, state.volume * trackGain(upcoming.track))
+          take.deck.volume = Math.min(1, outputVolume(state.volume) * trackGain(upcoming.track))
           take.deck.play().catch(() => {})
           handoff.current = take
         }

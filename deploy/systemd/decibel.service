@@ -21,6 +21,10 @@ Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=YTDLP_BIN=/opt/decibel-runtime/ytmusic/bin/yt-dlp
 Environment=YTMUSIC_PYTHON=/opt/decibel-runtime/ytmusic/bin/python
 Environment=YTDLP_CACHE_DIR=/var/lib/decibel/cache/yt-dlp
+# Optional: a bgutil PO token provider on localhost and the root-owned folder its yt-dlp plugin is loaded
+# from (see docs/pot-provider.md). Without YTDLP_POT_URL yt-dlp plugins stay disabled.
+#Environment=YTDLP_POT_URL=http://127.0.0.1:4416
+#Environment=YTDLP_PLUGIN_DIRS=/opt/decibel-runtime/ytmusic/lib/python3.13
 # Public downloads and update manifests (/download, /releases/*, /api/app/version); root-owned, read-only here.
 Environment=DECIBEL_RELEASES_DIR=/srv/decibel-releases
 Environment=YTDLP_ALLOWED_ORIGINS=tauri://localhost,http://tauri.localhost,https://tauri.localhost

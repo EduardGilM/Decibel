@@ -2,6 +2,41 @@
 
 All notable changes to Decibel. Versions follow the app version in `src-tauri/tauri.conf.json`.
 
+## 0.1.25
+
+Covers 0.1.21 to 0.1.25.
+
+### Added
+- **Calls and voice notes on Android**: the music fades out and pauses during a call or a voice note, and fades
+  back in when it ends.
+- **Optional PO token provider** for yt-dlp (bgutil), switched on with `YTDLP_POT_URL` and
+  `YTDLP_PLUGIN_DIRS`; `/api/music/health` reports its state. See [docs/pot-provider.md](docs/pot-provider.md).
+- `[stream]` log lines for failed audio resolutions and the replacements used.
+
+### Changed
+- **Devices**: music plays on the device where it is started. Opening the app never makes a device the output, and
+  a silent output hands over at once. A device is remote-controlled only when it was picked in **Dispositivos** or
+  is already playing. Volume is no longer synced. The devices icon is grey on the device that plays and takes the
+  accent colour when another device plays (its name is in the tooltip).
+- **Mobile**: the devices button moved from the bottom bar to the mini player.
+- Phones always play at full scale; the system volume keys set the loudness.
+
+### Fixed
+- **Profiles**: Home, albums, artists, favourites and the server playlists of the YouTube source are now built from
+  each profile's own history and likes. Before, every profile saw the server's shared legacy library, so different
+  profiles looked the same. No data was mixed: likes, history and playlists were already per profile.
+- **Search**: a full search shows the songs, albums or artists it found when one of its three catalogue lookups
+  fails, and fails only when all of them do. A catalogue 403/429 is retried once. Temporary catalogue failures are
+  a `503` with `Retry-After` (a proxy such as Cloudflare would replace a `502` body with its own page), and the app
+  retries them.
+- The recent-searches sync no longer polls the server in a loop.
+- **Playback**: one audio request stays under a 60 s budget (below Cloudflare's 100 s origin timeout). Temporary
+  failures are a `503`, and a video that will not play is a `410`. The player retries resolution, shows a plain
+  connection message and skips to the next song when a song cannot play.
+- A video that YouTube will not play (removed, blocked or a bot check) is replaced only by an official upload of
+  the very same song (same title, same main artist, ±3 s). A replacement for a removed video is remembered; one for a
+  bot check lasts 6 hours, in memory. The looser replacements of 0.1.23 are dropped.
+
 ## 0.1.20
 
 Covers 0.1.13 to 0.1.20.

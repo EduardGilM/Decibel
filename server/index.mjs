@@ -15,6 +15,7 @@ import { createReleases } from "./releases.mjs"
 import { createRequestSecurity } from "./request-security.mjs"
 import { createDevices } from "./devices.mjs"
 import { createSpotifyImport } from "./spotify.mjs"
+import { profileCollections } from "./profile-collections.mjs"
 
 export async function createApp({ music, publicDir, allowedOrigins = [], artwork = createArtworkService(), profiles, podcasts = profiles ? createPodcastService({ db: profiles.db }) : undefined, releases = createReleases({ dir: undefined }), spotify = profiles ? createSpotifyImport({ db: profiles.db, library: profiles.library, search: (query) => music.search(query, "tracks"), allowedOrigins }) : undefined, trustProxy, now = Date.now }) {
   const security = createRequestSecurity({ trustProxy })
@@ -74,6 +75,19 @@ export async function createApp({ music, publicDir, allowedOrigins = [], artwork
         let contents = ""
         for await (const chunk of req) { contents += chunk; if (contents.length > 4096) throw new MusicError("Petición demasiado grande.", 413) }
         try { return JSON.parse(contents) } catch { throw new MusicError("JSON no válido.") }
+      }
+      if (req.method === "GET" && user && profiles.db) {
+        // With profiles, the YouTube service's library is shared by everyone who played on this server, so
+        // the library views (Home, albums, artists, favourites, playlists) come from this profile's own data.
+        const own = () => profileCollections(profiles.db, user.id, "ytdlp")
+        switch (route) {
+          case "home": return json(own().home(await music.discovery?.()))
+          case "albums": return json(own().albums(url.searchParams.get("type") || undefined))
+          case "artists": return json(own().artists())
+          case "playlists": return json([])
+          case "playlist": throw new MusicError("Lista no encontrada.", 404)
+          case "starred": return json(profiles.library.likes(user.id, "ytdlp"))
+        }
       }
       if (req.method === "GET") {
         switch (route) {

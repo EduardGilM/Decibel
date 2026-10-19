@@ -42,16 +42,18 @@ export class YtDlpProvider implements MusicProvider {
 
   /**
    * Reads retry a busy server (429: every YouTube Music slot taken, e.g. right after a burst of suggestions) a few
-   * times with backoff before showing the error; writes are never repeated.
+   * times with backoff before showing the error; writes are never repeated. A temporary catalogue failure (503, or a
+   * 502/504 page from Cloudflare) is retried twice: YouTube Music answers some lookups with a 403 that passes on retry.
    */
-  private async request<T>(route: string, init: RequestInit = {}): Promise<T> {
-    const read = !init.method || init.method === "GET"
+  private async request<T>(route: string, init: RequestInit = {}, idempotent = false): Promise<T> {
+    const read = !init.method || init.method === "GET" || idempotent
     for (let attempt = 0; ; attempt++) {
       try {
         return await this.requestOnce<T>(route, init)
       } catch (error) {
         const status = (error as { status?: number }).status
-        if (!read || status !== 429 || attempt >= RETRY_DELAYS.length || init.signal?.aborted) throw error
+        const retries = status === 429 ? RETRY_DELAYS.length : status && [502, 503, 504].includes(status) ? 2 : status === 0 ? 1 : 0
+        if (!read || attempt >= retries || init.signal?.aborted) throw error
         await wait(RETRY_DELAYS[attempt], init.signal)
       }
     }
@@ -64,6 +66,8 @@ export class YtDlpProvider implements MusicProvider {
         ...init, credentials: "include", headers: { "Content-Type": "application/json", ...sessionHeaders(this.baseUrl), ...init.headers }, signal, cache: "no-store",
       })
       if (!response.headers.get("content-type")?.includes("application/json")) {
+        // Cloudflare replaces the body of an origin 502/504 (and its own outages) with an HTML page.
+        if ([502, 503, 504].includes(response.status)) throw Object.assign(new Error("El servicio de música no responde ahora mismo. Vuelve a intentarlo en unos segundos."), { status: response.status })
         throw new Error("El servicio de música no está disponible. Arranca la app con npm run serve o configura su URL en Conectar a YouTube.")
       }
       const data = await response.json()
@@ -71,7 +75,8 @@ export class YtDlpProvider implements MusicProvider {
       return data as T
     } catch (error) {
       if (init.signal?.aborted) throw init.signal.reason
-      if (error instanceof TypeError) throw new Error("No se puede conectar con el servicio de música. Revisa la URL y que el servidor esté encendido.")
+      // Also what a cross-origin app sees when a proxy error page (no CORS headers) replaces the answer.
+      if (error instanceof TypeError) throw Object.assign(new Error("No hay conexión con el servidor de música. Vuelve a intentarlo."), { status: 0 })
       if (error instanceof DOMException && error.name === "TimeoutError") throw new Error("El servicio de música ha tardado demasiado. Vuelve a intentarlo.")
       throw error
     }
@@ -130,7 +135,8 @@ export class YtDlpProvider implements MusicProvider {
   }
 
   async streamUrl(track: Track, signal?: AbortSignal, refresh = false) {
-    const stream = await this.request<StreamResult>("stream", { method: "POST", body: JSON.stringify({ id: track.id, refresh }), signal })
+    // Resolving a URL changes nothing on the server, so a temporary failure is retried like a read.
+    const stream = await this.request<StreamResult>("stream", { method: "POST", body: JSON.stringify({ id: track.id, refresh }), signal }, true)
     if (!stream.url) throw new Error("No se pudo obtener la URL del audio.")
     this.changed()
     return stream.url

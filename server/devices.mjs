@@ -78,10 +78,9 @@ export function createDevices({ now = Date.now } = {}) {
     if (route === "heartbeat") {
       if (typeof body.name !== "string" || !body.name.trim() || body.name.length > 80 || !["phone", "computer", "tablet"].includes(body.kind)) throw new MusicError("Nombre de dispositivo no válido.", 400)
       if (!s.devices.has(body.id) && s.devices.size >= 32) throw new MusicError("Demasiados dispositivos conectados.", 429)
-      const first = !s.devices.size && !s.state
+      // Opening the app never makes a device the output: playback goes where it is started (transfer to itself).
       const previous = s.devices.get(body.id)
       s.devices.set(body.id, { id: body.id, name: body.name.trim(), kind: body.kind, seen: now(), leaseUntil: previous?.leaseUntil ?? 0 })
-      if (first) { s.activeId = body.id; s.epoch++; s.state = state ?? null }
       if (s.pending?.previous === body.id && body.stopped === true) {
         // Last position after silencing the previous device.
         if (state) s.state = state
@@ -102,13 +101,15 @@ export function createDevices({ now = Date.now } = {}) {
         if (s.pending) throw new MusicError("Espera a que termine el cambio de dispositivo.", 409)
         if (s.activeId !== body.target) {
           const previous = s.activeId
+          // A silent output cannot overlap: hand over at once instead of waiting for its lease.
+          const silent = !s.state?.isPlaying
           if (previous === body.id && state) s.state = state
           if (!s.state && state) s.state = state
           s.pending = { target: body.target, previous, until: s.devices.get(previous)?.leaseUntil ?? now() }
           s.activeId = null
           s.commands = []
           s.epoch++
-          if (!previous || now() >= s.pending.until) finish(s)
+          if (!previous || silent || now() >= s.pending.until) finish(s)
         }
       } else if (route === "command") {
         if (!s.activeId || s.pending) throw new MusicError("Elige un dispositivo conectado.", 409)

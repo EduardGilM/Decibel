@@ -1,11 +1,14 @@
 # Playback devices
 
 Open Decibel with the same profile and server on several devices and use **Dispositivos** (devices) to choose
-where the music plays. The picker is in the desktop player bar, the mobile navigation and the full-screen player.
+where the music plays. The picker is in the desktop player bar, the mobile mini player and the full-screen player.
 
-Switching keeps the song, the position and the queue. Play, pause, skip, searching for another song, editing the
-queue and changing the volume from any other device control the selected output. Only the device that plays
-records the listens. With no device selected, pressing a playback control makes the device you are using take over.
+Music plays on the device where you start it; opening the app never makes a device the output. Switching keeps
+the song, the position and the queue. A device is controlled remotely only when you picked it in **Dispositivos**
+or it is already playing: then play, pause, skip, searching for another song and editing the queue from any other
+device control it. Volume is not synced (phones always play at full scale and use the system volume keys). Only
+the device that plays records the listens. The devices icon takes the accent colour when another device plays, with
+its name in the tooltip.
 
 Devices appear while a compatible version of Decibel is open and connected. The native apps bundle their own UI, so
 they need a release that includes this feature. A receiving browser may require pressing **Reproducir** there once
@@ -27,6 +30,6 @@ device or an import changed it.
 The authenticated `/api/devices/{heartbeat,transfer,command}` endpoints take JSON over POST. Clients poll about
 once a second, and a device disappears after 20 seconds without answering. Commands carry a sequence number and
 are kept until the output confirms them. Every transfer invalidates earlier commands and waits until the previous
-output confirms that it stopped the audio, or until its 8-second lease expires. A client stops its audio before
+output confirms that it stopped the audio, or until its 8-second lease expires; an output that is not playing hands over at once. A client stops its audio before
 the lease expires if it cannot renew it. Background restrictions of the browser or the operating system also
 affect these timers.

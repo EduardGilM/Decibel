@@ -144,6 +144,8 @@ export function MobilePlayer() {
         {/* pb-3: room for the seek line so its touch zone mostly sits below the controls */}
         <div className="relative flex items-center gap-2 p-1.5 pr-1 pb-3">
           <MiniStrip track={track} />
+          {/* Spotify-style: the device picker sits in the mini player (no tab in the bottom bar). */}
+          <DevicePicker className="size-10 shrink-0" />
           <TrackSaveButtons track={track} buttonClassName="size-10" />
           <Button variant="ghost" size="icon" className="size-11 [&_svg:not([class*='size-'])]:size-6" aria-label={isPlaying ? "Pausar" : "Reproducir"} onClick={() => usePlayer.getState().toggle()}>
             {isPlaying ? <Pause className="fill-current" /> : <Play className="fill-current" />}

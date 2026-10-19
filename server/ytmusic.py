@@ -2,6 +2,7 @@
 import json
 import re
 import sys
+import time
 from importlib.metadata import version
 
 try:
@@ -15,7 +16,13 @@ except ImportError:
 class TimeoutSession(requests.Session):
     def request(self, method, url, **kwargs):
         kwargs.setdefault("timeout", 15)
-        return super().request(method, url, **kwargs)
+        response = super().request(method, url, **kwargs)
+        # YouTube answers some catalogue requests with a "Sorry... automated queries" 403 (or a 429); the
+        # same request usually succeeds right away, so retry once before giving up. Read-only requests only.
+        if response.status_code in (403, 429):
+            time.sleep(0.3)
+            response = super().request(method, url, **kwargs)
+        return response
 
 
 def main():

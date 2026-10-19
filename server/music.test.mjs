@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 import { createApp } from "./index.mjs"
-import { createMusicService, createYtDlpRunner, searchTarget, videoId } from "./ytdlp.mjs"
+import { createMusicService, createYtDlpRunner, MusicError, searchTarget, videoId } from "./ytdlp.mjs"
 import { createYtMusicRunner } from "./ytmusic.mjs"
 
 const info = { id: "BaW_jenozKc", title: "Prueba de audio", uploader: "Canal de prueba", duration: 10, url: "https://audio.googlevideo.com/videoplayback?expire=4102444800" }
@@ -383,4 +383,100 @@ test("upgrading video metadata preserves track, album and artist favourites and 
 
 test("missing catalogue Python produces an actionable error", async () => {
   await assert.rejects(createYtMusicRunner("/nonexistent-musica-python", "server/ytmusic.py")("health"), /npm run music:setup/)
+})
+
+test("an unplayable video plays the next catalogue match for the same song, remembered across restarts", async (t) => {
+  const alt = "ALTERNATE00"
+  const asked = []
+  const run = async (args) => {
+    const id = new URL(args.at(-1)).searchParams.get("v")
+    asked.push(id)
+    if (id === info.id) throw new MusicError("[youtube] BaW_jenozKc: Video unavailable. This video is not available", 502)
+    return JSON.stringify({ ...info, id })
+  }
+  const catalog = async (operation, value) => operation === "search" ? (value.startsWith("Título del catálogo") ? [song, { ...song, videoId: "TOOLONG0000", duration_seconds: 14, videoType: "MUSIC_VIDEO_TYPE_ATV" }, { ...song, videoId: alt, title: "Título del catálogo (Remastered 2011)", videoType: "MUSIC_VIDEO_TYPE_ATV" }] : [song]) : ["searchAlbums", "searchArtists"].includes(operation) ? [] : song
+  const f = await fixture(t, run, catalog)
+  await f.music.search("una canción")
+  t.mock.method(console, "warn", () => {})
+  const stream = await f.music.stream(info.id)
+  assert.match(stream.url, /googlevideo/)
+  assert.equal(stream.track.id, `yt:${info.id}`)
+  assert.deepEqual(asked, [info.id, alt])
+  const restarted = await createMusicService({ dataDir: f.dataDir, run, catalog })
+  asked.length = 0
+  assert.equal((await restarted.stream(info.id)).track.id, `yt:${info.id}`)
+  assert.deepEqual(asked, [alt])
+})
+
+test("a temporary resolution failure is a 503 with Retry-After, not an alternate", async (t) => {
+  let asked = 0
+  const f = await fixture(t, async () => { asked++; throw new MusicError("YouTube ha tardado demasiado. Vuelve a intentarlo.", 502) })
+  await f.music.search("una canción")
+  t.mock.method(console, "warn", () => {})
+  await assert.rejects(f.music.stream(info.id), (error) => error.status === 503 && error.retryAfter === 5)
+  assert.equal(asked, 1)
+})
+
+test("a video with no replacement is a clear 410", async (t) => {
+  const f = await fixture(t, async () => { throw new MusicError("Private video. Sign in if you've been granted access", 502) }, async (operation) => operation === "search" ? [song] : ["searchAlbums", "searchArtists"].includes(operation) ? [] : song)
+  await f.music.search("una canción")
+  t.mock.method(console, "warn", () => {})
+  await assert.rejects(f.music.stream(info.id), { status: 410, message: /no está disponible/ })
+})
+
+test("a bot check on one video tries another upload of the same song; with none it is a 503 to retry later", async (t) => {
+  const bot = () => new MusicError("[youtube] BaW_jenozKc: Sign in to confirm you’re not a bot. Use --cookies-from-browser", 502)
+  const asked = []
+  const catalog = async (operation) => operation === "search" ? [song, { ...song, videoId: "ALTERNATE00", videoType: "MUSIC_VIDEO_TYPE_ATV" }] : ["searchAlbums", "searchArtists"].includes(operation) ? [] : song
+  const f = await fixture(t, async (args) => { const id = new URL(args.at(-1)).searchParams.get("v"); asked.push(id); if (id === info.id) throw bot(); return JSON.stringify({ ...info, id }) }, catalog)
+  await f.music.search("una canción")
+  t.mock.method(console, "warn", () => {})
+  assert.equal((await f.music.stream(info.id)).track.id, `yt:${info.id}`)
+  assert.deepEqual(asked, [info.id, "ALTERNATE00"])
+  assert.deepEqual(JSON.parse(await readFile(join(f.dataDir, "library.json"), "utf8")).replacements, {}) // not for good
+  asked.length = 0
+  await f.music.stream(info.id, { refresh: true })
+  assert.deepEqual(asked, ["ALTERNATE00"]) // but for a while
+  const g = await fixture(t, async () => { throw bot() }, catalog)
+  await g.music.search("una canción")
+  await assert.rejects(g.music.stream(info.id), (error) => error.status === 503 && /Prueba más tarde/.test(error.message))
+})
+
+test("a replacement must be the very same song: near misses never play", async () => {
+  const { sameSong, songTitle } = await import("./ytdlp.mjs")
+  const known = { title: "Faro de papel (feat. Nube)", artist: "Los Ejemplos", artists: [{ name: "Los Ejemplos" }], duration: 305 }
+  const upload = (extra) => ({ videoId: "ALTERNATE00", title: "Faro de papel", artists: [{ name: "Los Ejemplos" }, { name: "Nube" }], duration_seconds: 305, videoType: "MUSIC_VIDEO_TYPE_ATV", ...extra })
+  assert.equal(songTitle("A la orilla del río - Remastered 2015"), "a la orilla del rio")
+  assert.equal(songTitle("Stand By (Official Video) [HD]"), "stand by")
+  assert.ok(sameSong(known, upload()))
+  assert.ok(sameSong(known, upload({ title: "Faro De Papel (feat. Nube) [Remastered]", duration_seconds: 303 })))
+  assert.ok(sameSong(known, upload({ title: "Faro de papel (Official Video)", videoType: "MUSIC_VIDEO_TYPE_OMV" })))
+  // What 0.1.23 picked: another Los Ejemplos song of a similar length.
+  assert.ok(!sameSong(known, upload({ title: "Otra canción cualquiera", duration_seconds: 296 })))
+  assert.ok(!sameSong(known, upload({ title: "Faro de papel (Versión acústica)" })))
+  assert.ok(!sameSong(known, upload({ title: "Faro de papel 2" })))
+  assert.ok(!sameSong(known, upload({ artists: [{ name: "Nube" }] })), "another main artist (a cover)")
+  assert.ok(!sameSong(known, upload({ duration_seconds: 310 })), "5 s longer is another cut")
+  assert.ok(!sameSong(known, upload({ duration_seconds: undefined })))
+  assert.ok(!sameSong(known, upload({ videoType: "MUSIC_VIDEO_TYPE_UGC" })), "only official uploads")
+  assert.ok(!sameSong({ ...known, duration: 0 }, upload()))
+})
+
+test("without a certain match nothing else plays, and 0.1.23's loose replacements are dropped", async (t) => {
+  const { mkdtemp, writeFile } = await import("node:fs/promises")
+  const dataDir = await mkdtemp(join(tmpdir(), "musica-test-"))
+  t.after(() => rm(dataDir, { recursive: true, force: true }))
+  const track = { id: `yt:${info.id}`, title: "Faro de papel (feat. Nube)", artist: "Los Ejemplos", duration: 305, metadataSource: "ytmusic" }
+  await writeFile(join(dataDir, "library.json"), JSON.stringify({ tracks: { [track.id]: { addedAt: 1, lastPlayed: 1, plays: 1, track } }, likes: { track: [], album: [], artist: [] }, alternates: { [info.id]: "LOOSEMATCH0" } }))
+  const asked = []
+  const run = async (args) => { const id = new URL(args.at(-1)).searchParams.get("v"); asked.push(id); throw new MusicError("Sign in to confirm you’re not a bot", 502) }
+  const catalog = async (operation) => operation === "search" ? [{ ...song, videoId: "LOOSEMATCH0", title: "Otra canción cualquiera", artists: [{ name: "Los Ejemplos" }], duration_seconds: 296, videoType: "MUSIC_VIDEO_TYPE_ATV" }] : song
+  const music = await createMusicService({ dataDir, run, catalog })
+  t.mock.method(console, "warn", () => {})
+  await assert.rejects(music.stream(info.id), { status: 503 })
+  assert.deepEqual(asked, [info.id])
+  await music.scrobble(info.id, false)
+  const saved = JSON.parse(await readFile(join(dataDir, "library.json"), "utf8"))
+  assert.equal(saved.alternates, undefined)
+  assert.deepEqual(saved.replacements, {})
 })

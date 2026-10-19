@@ -10,6 +10,7 @@ import { describePauses, pauseLog, type PauseEntry } from "@/lib/pause-log"
 import { useProvider } from "@/lib/providers"
 import { useAuthenticatedArtwork } from "@/hooks/use-authenticated-artwork"
 import { usePlayer } from "@/stores/player"
+import { interruption } from "./interruption-controller"
 import { useProfile } from "@/stores/profile"
 import { useSession } from "@/stores/session"
 import { browseAuto, resolveAutoPlay, searchAuto } from "@/lib/android-auto"
@@ -187,6 +188,8 @@ export function NativeMediaBridge() {
           break
         }
         case "seek": if (arg != null) p.seek(arg); break
+        // A call, a voice note or another app recording began (1) or ended (0): fade out and pause / fade back in.
+        case "interrupt": void (arg ? interruption.begin() : interruption.end()); break
         case "duck": {
           const audio = p.audio
           if (!audio) break

@@ -91,9 +91,12 @@ export function createYtMusicRunner(python, script) {
       if (error?.name === "AbortError") reject(new MusicError("Consulta cancelada.", 499))
       else if (error) {
         const setup = error.code === "ENOENT" || stderr.includes('"setup"') || stderr.includes("No module named")
-        reject(new MusicError(setup ? "Falta YouTube Music en el servidor. Ejecuta npm run music:setup." : error.killed ? "YouTube Music ha tardado demasiado. Vuelve a intentarlo." : "No se pudo consultar YouTube Music. Vuelve a intentarlo.", 502))
+        // A temporary catalogue failure is a 503 with Retry-After: Cloudflare replaces the body of an origin 502
+        // with its own HTML page, so the app would only say that the service is down.
+        reject(setup ? new MusicError("Falta YouTube Music en el servidor. Ejecuta npm run music:setup.", 502)
+          : Object.assign(new MusicError(error.killed ? "YouTube Music ha tardado demasiado. Vuelve a intentarlo." : "No se pudo consultar YouTube Music. Vuelve a intentarlo.", 503), { retryAfter: 5 }))
       } else {
-        try { resolve(JSON.parse(stdout)) } catch { reject(new MusicError("YouTube Music devolvió una respuesta no válida.", 502)) }
+        try { resolve(JSON.parse(stdout)) } catch { reject(Object.assign(new MusicError("YouTube Music devolvió una respuesta no válida.", 503), { retryAfter: 5 })) }
       }
     })
   })

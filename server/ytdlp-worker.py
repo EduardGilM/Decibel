@@ -11,7 +11,15 @@ import sys
 def main() -> None:
     cache_dir = sys.argv[1] if len(sys.argv) > 1 else None
     node = sys.argv[2] if len(sys.argv) > 2 else None
+    import os
     import yt_dlp
+    from yt_dlp.globals import plugin_dirs
+
+    # PO token provider (bgutil HTTP server): same switches as the CLI runner in ytdlp.mjs.
+    pot_url = os.environ.get("YTDLP_POT_URL", "").strip().rstrip("/")
+    pot_plugins = os.environ.get("YTDLP_PLUGIN_DIRS", "").strip() if pot_url else ""
+    # Like --no-plugin-dirs / --plugin-dirs: never load plugins from folders the service can write.
+    plugin_dirs.value = [pot_plugins] if pot_plugins else []
 
     formats = "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio[ext=mp3]/bestaudio[ext=ogg]/bestaudio[ext=opus]"
     fields = ("id", "is_live", "url", "title", "track", "artist", "album", "uploader", "channel", "duration", "release_year", "upload_date")
@@ -26,8 +34,12 @@ def main() -> None:
             }
             if cache_dir:
                 options["cachedir"] = cache_dir
-            if direct:
-                options["extractor_args"] = {"youtube": {"skip": ["hls"]}}
+            youtube: dict = {"skip": ["hls"]} if direct else {}
+            if pot_url:
+                youtube["player_client"] = ["default", "mweb"]
+                options["extractor_args"] = {"youtubepot-bgutilhttp": {"base_url": [pot_url]}}
+            if youtube:
+                options.setdefault("extractor_args", {})["youtube"] = youtube
             # Sin un runtime JS explícito YouTube no resuelve el reto n y acapara las URLs.
             options["js_runtimes"] = {"node": {"path": node}} if node else {}
             sessions[direct] = yt_dlp.YoutubeDL(options)

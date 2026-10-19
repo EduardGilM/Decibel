@@ -148,3 +148,8 @@ backup API (as `install.sh` does, into `/var/backups/decibel`) or with the servi
 ```sh
 sqlite3 /var/lib/decibel/decibel.db ".backup '/var/backups/decibel-$(date +%F).db'"
 ```
+
+## Optional: PO token provider
+
+If YouTube often answers with "Sign in to confirm you're not a bot", you can run a bgutil PO token provider next to
+Decibel and set `YTDLP_POT_URL` and `YTDLP_PLUGIN_DIRS`. See [pot-provider.md](pot-provider.md).

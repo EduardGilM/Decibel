@@ -49,8 +49,12 @@ export const useSearch = create<SearchState>()(persist((set) => {
     forget: (scope, id) => push(scope, (n, at) => ({ n, op: "remove", kind: "track", id, at })),
     clearRecent: (scope) => push(scope, (n, at) => ({ n, op: "clear", at })),
     confirm: (scope, rows, sent) => set((state) => {
-      const queue = (state.queue[scope] ?? []).filter((op) => !sent.includes(op.n))
-      return { rows: { ...state.rows, [scope]: applyRecent(rows, queue, MAX_RECENT) }, queue: { ...state.queue, [scope]: queue } }
+      const current = state.queue[scope] ?? []
+      const queue = current.filter((op) => !sent.includes(op.n))
+      const next = { rows: { ...state.rows, [scope]: applyRecent(rows, queue, MAX_RECENT) } }
+      // Keep the same `queue` object when nothing left it: search-sync syncs again whenever `queue` changes,
+      // so a new object on every read would poll /api/me/searches in a loop (0.1.20).
+      return queue.length === current.length ? next : { ...next, queue: { ...state.queue, [scope]: queue } }
     }),
   }
 }, {

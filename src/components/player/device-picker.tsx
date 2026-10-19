@@ -8,7 +8,11 @@ import { useDevices } from "@/stores/devices"
 import { cn } from "@/lib/utils"
 import { VolumeControl } from "./controls"
 
-export function DevicePicker({ variant = "icon" }: { variant?: "icon" | "label" | "nav" }) {
+/**
+ * `icon`: Spotify-style, no text. Grey while the music is here (or nothing plays), accent while another device is the
+ * output; its name is in the tooltip. `label`: the full player's button with the device name.
+ */
+export function DevicePicker({ variant = "icon", className }: { variant?: "icon" | "label"; className?: string }) {
   const [open, setOpen] = useState(false)
   const [sending, setSending] = useState(false)
   const state = useDevices()
@@ -25,15 +29,16 @@ export function DevicePicker({ variant = "icon" }: { variant?: "icon" | "label" 
           variant="ghost"
           size={variant === "icon" ? "icon" : "default"}
           aria-label={`Dispositivos · ${label}`}
-          title={label}
+          title={remote && !pending ? `Sonando en ${active.name}` : label}
           className={cn(
-            variant === "nav" ? "h-14 flex-col gap-1 rounded-lg text-[11px] font-medium hover:bg-transparent" : "rounded-full",
+            "rounded-full",
             variant === "label" && "max-w-full text-xs",
-            active ? "text-primary" : "text-muted-foreground",
+            (variant === "label" ? active : remote) ? "text-primary" : "text-muted-foreground",
+            className,
           )}
         >
-          {pending ? <Loader2 className="size-5 animate-spin" /> : <Speaker className={variant === "nav" ? "size-6!" : "size-5"} />}
-          {variant !== "icon" && <span className="truncate">{variant === "nav" ? "Dispositivos" : label}</span>}
+          {pending ? <Loader2 className="size-5 animate-spin" /> : <Speaker className="size-5" />}
+          {variant !== "icon" && <span className="truncate">{label}</span>}
         </Button>
       </DialogTrigger>
       <DialogContent className="z-[110] max-h-[90dvh] overflow-y-auto rounded-3xl p-6">

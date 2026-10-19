@@ -12,22 +12,27 @@ function setup() {
   const service = createDevices({ now: () => time })
   const call = (route, body, user = "profile-a") => service.perform(user, route, body)
   const beat = (device, extra = {}, user) => call("heartbeat", { ...device, ...extra }, user)
-  return { call, beat, advance: (ms) => { time += ms } }
+  // The device that starts playback makes itself the output.
+  const start = (device, extra = {}, user) => {
+    const t = call("transfer", { ...device, target: device.id, epoch: beat(device, {}, user).epoch, state: state(), ...extra }, user)
+    return t.activeId === device.id ? beat(device, { epoch: t.epoch }, user) : t // the output's heartbeat renews its lease
+  }
+  return { call, beat, start, advance: (ms) => { time += ms } }
 }
 
 test("devices and commands are scoped to the authenticated profile", () => {
-  const { call, beat } = setup()
-  const a = beat(desktop, { state: state() })
+  const { call, beat, start } = setup()
+  const a = start(desktop)
   assert.equal(a.activeId, desktop.id)
-  const b = beat(phone, { state: state() }, "profile-b")
+  const b = start(phone, {}, "profile-b")
   assert.deepEqual(b.devices.map((d) => d.id), [phone.id])
   assert.throws(() => call("transfer", { id: phone.id, target: desktop.id, epoch: b.epoch }, "profile-b"), { status: 404 })
   assert.throws(() => call("command", { id: phone.id, epoch: a.epoch, command: { action: "toggle", args: [] } }), { status: 409 })
 })
 
 test("transfer waits for the previous output to stop and preserves its final queue and position", () => {
-  const { call, beat } = setup()
-  const a = beat(desktop, { state: state() })
+  const { call, beat, start } = setup()
+  const a = start(desktop)
   beat(phone)
   const pending = call("transfer", { id: phone.id, target: phone.id, epoch: a.epoch })
   assert.equal(pending.activeId, null)
@@ -43,8 +48,8 @@ test("transfer waits for the previous output to stop and preserves its final que
 })
 
 test("controls are delivered only to the output and retained until acknowledged", () => {
-  const { call, beat } = setup()
-  const a = beat(desktop, { state: state() })
+  const { call, beat, start } = setup()
+  const a = start(desktop)
   beat(phone)
   call("command", { id: phone.id, epoch: a.epoch, command: { action: "seek", args: [60] } })
   assert.equal(beat(phone).commands.length, 0)
@@ -57,8 +62,8 @@ test("controls are delivered only to the output and retained until acknowledged"
 })
 
 test("an unreachable output cannot overlap a transfer before its lease expires", () => {
-  const { call, beat, advance } = setup()
-  const a = beat(desktop, { state: state() })
+  const { call, beat, start, advance } = setup()
+  const a = start(desktop)
   beat(phone)
   call("transfer", { id: phone.id, target: phone.id, epoch: a.epoch })
   advance(7999)
@@ -70,9 +75,9 @@ test("an unreachable output cannot overlap a transfer before its lease expires",
 })
 
 test("invalid snapshots, controls and oversized registries are rejected", () => {
-  const { beat, call } = setup()
+  const { beat, call, start } = setup()
   assert.throws(() => beat(desktop, { state: { ...state(), index: 4 } }), { status: 400 })
-  const a = beat(desktop, { state: state() })
+  const a = start(desktop)
   for (const command of [{ action: "seek", args: [-1] }, { action: "setVolume", args: [2] }, { action: "configureRecommendations", args: [] }, { action: "next", args: [true] }]) {
     assert.throws(() => call("command", { id: desktop.id, epoch: a.epoch, command }), { status: 400 })
   }
@@ -101,5 +106,19 @@ test("device HTTP routes require authentication and reject malformed bodies", as
   assert.equal((await fetch(url, { method: "POST", headers, body: "{" })).status, 400)
   const ok = await fetch(url, { method: "POST", headers, body: JSON.stringify({ ...desktop, state: state() }) })
   assert.equal(ok.status, 200)
-  assert.equal((await ok.json()).activeId, desktop.id)
+  assert.equal((await ok.json()).activeId, null, "opening the app does not make it the output")
+})
+
+test("no device takes the output by opening the app; whoever starts playback gets it", () => {
+  const { call, beat, start } = setup()
+  assert.equal(beat(desktop, { state: state() }).activeId, null)
+  assert.equal(beat(phone).activeId, null)
+  const playing = start(phone)
+  assert.equal(playing.activeId, phone.id)
+  assert.equal(beat(desktop).activeId, phone.id, "the computer only shows where it plays")
+  // The phone pauses; starting a song on the computer moves the output there at once (nothing to overlap).
+  beat(phone, { epoch: playing.epoch, state: { ...state(), isPlaying: false } })
+  const desktopNow = call("transfer", { ...desktop, target: desktop.id, epoch: playing.epoch, state: state() })
+  assert.equal(desktopNow.activeId, desktop.id)
+  assert.equal(desktopNow.pendingId, null)
 })

@@ -48,7 +48,8 @@ It runs as a web app/PWA and as an Android app built with Tauri.
 - **Navidrome / Subsonic** as an alternative source, with offline downloads (Subsonic only).
 - **Podcasts**: search, RSS feeds, follow shows, "continue listening" and top charts per country (Apple's public charts).
 - **Profiles**: login with long-lived sessions and an admin panel. Each profile has its own likes, history,
-  playlists (private, shared with viewer/editor roles, or collaborative), settings and a yearly **Wrapped**.
+  playlists (private, shared with viewer/editor roles, or collaborative), settings, Home, albums, artists and a
+  yearly **Wrapped**.
 - **Player**: synced lyrics from [LRCLIB](https://lrclib.net) with a translucent, blurred header over the lyrics
   preview, editable queue, shuffle/repeat, crossfade and gapless playback, Media Session controls, clickable
   artist credits (each featured artist links to its page). A playback watchdog retries a song that gets stuck
@@ -58,16 +59,16 @@ It runs as a web app/PWA and as an Android app built with Tauri.
   also from the «…» menu and right-click; an «A continuación» card in the desktop side panel, and swipe the mini
   player to skip tracks.
 - **Recent searches** synced per profile across devices (local cache, offline queue).
-- **Devices**: pick where the music plays among the devices open with the same profile (Spotify Connect style);
-  song, position and queue move along, and the others become remotes. Likes and playlists also sync across
+- **Devices**: music plays where you start it; pick another output among the devices open with the same profile
+  (Spotify Connect style) and song, position and queue move along, while the others become remotes. Likes and playlists also sync across
   devices automatically. See [docs/devices.md](docs/devices.md).
 - **Import from Spotify**: a public playlist by link, or the whole library (likes and playlists) from an
   [Exportify](https://exportify.app) ZIP or, optionally, with a Spotify app on the server. Songs are matched on
   YouTube Music in the background. See [docs/spotify-import.md](docs/spotify-import.md).
 - **Themes**, including a dynamic one that derives the accent colour from the current artwork.
 - **Platforms**: web, installable PWA, an Android app and desktop apps for Windows and Linux (Tauri v2). Android
-  has a media notification, background playback and **Android Auto** (browse the queue, likes and playlists,
-  voice search); the desktop apps have an integrated title bar, and on
+  has a media notification, background playback, fades the music out during calls and voice notes, and
+  **Android Auto** (browse the queue, likes and playlists, voice search); the desktop apps have an integrated title bar, and on
   Windows taskbar thumbnail buttons (previous, play/pause, next, mute) and system media controls.
 - **Downloads and in-app updates** from your own server: a minimal `/download` page, and native apps that update
   in place with a progress bar (signed Tauri updater on desktop, in-app APK download plus the system installer on
@@ -232,6 +233,7 @@ are read by the server at start-up.
 | `DECIBEL_RELEASES_DIR` | unset | Directory served at `/download`, `/releases/*` and `/api/app/version`. |
 | `YTDLP_ALLOWED_ORIGINS` | Tauri origins | Extra CORS origins (exact scheme, host and port), comma-separated. |
 | `YTDLP_BIN`, `YTMUSIC_PYTHON`, `YTDLP_CACHE_DIR`, `PYTHON_BIN` | `.tools/…` | Alternative tool paths. |
+| `YTDLP_POT_URL` / `YTDLP_PLUGIN_DIRS` | unset | Optional PO token provider for yt-dlp and the read-only folder its plugin is loaded from. See [docs/pot-provider.md](docs/pot-provider.md). |
 
 ## Development
 

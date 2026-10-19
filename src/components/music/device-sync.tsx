@@ -10,6 +10,17 @@ import { useProfile } from "@/stores/profile"
 import { useSession } from "@/stores/session"
 import { useKeyboardShortcuts } from "./keyboard-shortcuts"
 
+/** Actions that start a song: they always play on the device where they were chosen. */
+const STARTS = new Set(["playList", "jumpTo"])
+
+/** Another device's queue and position, without its volume: each device keeps its own (phones use the system's). */
+function adopt(state: PlaybackSnapshot): Omit<PlaybackSnapshot, "volume" | "muted"> {
+  const rest: Partial<PlaybackSnapshot> = { ...state }
+  delete rest.volume
+  delete rest.muted
+  return rest as Omit<PlaybackSnapshot, "volume" | "muted">
+}
+
 function identity(): PlaybackDevice {
   const ua = navigator.userAgent
   const kind = /iPad|Tablet/i.test(ua) ? "tablet" : /Android|iPhone/i.test(ua) ? "phone" : "computer"
@@ -34,6 +45,8 @@ export function DeviceSync() {
     const device = identity()
     const abort = new AbortController()
     let disposed = false, applying = false, epoch = -1, ack = 0, initialized = false, polling = false
+    // The other device picked in Dispositivos from here: only then do this device's controls drive it.
+    let chosen: string | null = null
     let stoppedState: PlaybackSnapshot | undefined
     let timer: ReturnType<typeof setTimeout> | undefined
     let lease: ReturnType<typeof setTimeout> | undefined
@@ -66,7 +79,7 @@ export function DeviceSync() {
       clearTimeout(lease)
       if (local) {
         if (changed && response.state) {
-          usePlayer.setState({ ...response.state, playbackId: usePlayer.getState().playbackId + 1, buffering: false })
+          usePlayer.setState({ ...adopt(response.state), playbackId: usePlayer.getState().playbackId + 1, buffering: false })
         }
         stoppedState = undefined
         useDevices.setState({ localPlayback: true })
@@ -87,7 +100,7 @@ export function DeviceSync() {
         } finally { applying = false }
       } else {
         silence()
-        if (response.state && !response.pendingId) usePlayer.setState({ ...response.state, buffering: false })
+        if (response.state && !response.pendingId) usePlayer.setState({ ...adopt(response.state), buffering: false })
       }
       initialized = true
       useDevices.setState({ connected: true, devices: response.devices, activeId: response.activeId, pendingId: response.pendingId, error: null })
@@ -120,7 +133,7 @@ export function DeviceSync() {
           const local = useDevices.getState().localPlayback
           receive(await request("heartbeat", {
             ack,
-            stopped: !local && !usePlayer.getState().audio,
+            stopped: !local && (usePlayer.getState().audio?.paused ?? true),
             state: local ? playbackSnapshot(usePlayer.getState()) : stoppedState,
           }), sent)
         })
@@ -129,7 +142,30 @@ export function DeviceSync() {
       if (!disposed) timer = setTimeout(heartbeat, 1000)
     }
 
+    /** Makes this device the output (the previous one stops first) and waits until it is, about a second. */
+    const claim = async () => {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const sent = Date.now()
+          receive(await request("transfer", { target: device.id, state: playbackSnapshot(usePlayer.getState()) }), sent)
+          break
+        } catch (error) {
+          // The output changed meanwhile: learn the new epoch and try once more.
+          if (attempt > 0 || !(error instanceof ApiError) || error.status !== 409) throw error
+          const sent = Date.now()
+          receive(await request("heartbeat", { ack, stopped: true }), sent)
+        }
+      }
+      for (let i = 0; i < 15 && !(useDevices.getState().activeId === device.id && useDevices.getState().localPlayback); i++) {
+        await new Promise((resolve) => setTimeout(resolve, 700))
+        const sent = Date.now()
+        receive(await request("heartbeat", { ack, stopped: true }), sent)
+      }
+      chosen = null
+    }
+
     useDevices.setState({ enabled: true, deviceId: device.id, error: null, transfer: async (target) => {
+      chosen = target === device.id ? null : target
       try {
         await enqueue(async () => {
           const sent = Date.now()
@@ -147,18 +183,21 @@ export function DeviceSync() {
       if (applying) return false
       const state = useDevices.getState()
       if (initialized && state.localPlayback && state.activeId === device.id && !state.pendingId) return false
-      if (state.pendingId) { toast.error("Cambiando de dispositivo…"); return true }
+      if (state.pendingId && state.pendingId !== device.id) { toast.error("Cambiando de dispositivo…"); return true }
       void enqueue(async () => {
-        // No device selected: the one where the app is takes over (queued after the first heartbeat, so it knows).
-        if (!useDevices.getState().activeId) {
-          const sent = Date.now()
-          receive(await request("transfer", { target: device.id, state: playbackSnapshot(usePlayer.getState()) }), sent)
-        }
+        // Playback plays where it is started. Controls drive another device only when it was picked in
+        // Dispositivos from here, or when it is already playing (the app shows «Sonando en …»). Choosing a song
+        // always plays here, and nothing is ever moved by just opening the app. (Queued after the first heartbeat.)
+        const now = useDevices.getState()
+        const remote = now.activeId && now.activeId !== device.id ? now.activeId : null
+        const here = !remote || STARTS.has(command.action) || (remote !== chosen && !usePlayer.getState().isPlaying)
+        if (here && !(now.activeId === device.id && now.localPlayback && !now.pendingId)) await claim()
         if (useDevices.getState().activeId === device.id && useDevices.getState().localPlayback) {
           applying = true
           try { void (usePlayer.getState()[command.action] as (...args: unknown[]) => unknown)(...command.args) } finally { applying = false }
           return
         }
+        if (here) throw new Error("No se pudo reproducir en este dispositivo. Vuelve a intentarlo.")
         // A command response does not renew the receiver's playback lease.
         const args = [...command.args]
         if (command.action === "seek" && typeof args[0] === "number") args[0] = Math.max(0, Math.min(args[0], usePlayer.getState().duration || 604800))

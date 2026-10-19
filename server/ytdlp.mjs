@@ -42,12 +42,46 @@ export function mapTrack(info) {
   }
 }
 
+// PO token provider (bgutil HTTP server). YTDLP_POT_URL turns it on; the plugin is only
+// loaded from YTDLP_PLUGIN_DIRS (the root-owned runtime), never from folders the service can write.
+// mweb is the client the PO Token Guide recommends with a provider; the default clients stay first.
+export const POT_PLAYER_CLIENTS = "default,mweb"
+export function potConfig(env = process.env) {
+  const url = env.YTDLP_POT_URL?.trim().replace(/\/+$/, "") || null
+  return { url, pluginDirs: (url && env.YTDLP_PLUGIN_DIRS?.trim()) || null }
+}
+
+export function cliArguments(args, { cacheDir, pot = potConfig() } = {}) {
+  const extra = [...args]
+  if (pot.url) {
+    // yt-dlp keeps only the last --extractor-args per extractor, so join ours with the caller's.
+    const at = extra.findIndex((value, index) => extra[index - 1] === "--extractor-args" && value.startsWith("youtube:"))
+    if (at >= 0) extra[at] = `${extra[at]};player_client=${POT_PLAYER_CLIENTS}`
+    else extra.unshift("--extractor-args", `youtube:player_client=${POT_PLAYER_CLIENTS}`)
+    extra.unshift("--extractor-args", `youtubepot-bgutilhttp:base_url=${pot.url}`)
+  }
+  return [
+    "--ignore-config", ...(pot.pluginDirs ? ["--plugin-dirs", pot.pluginDirs] : ["--no-plugin-dirs"]),
+    ...(cacheDir ? ["--cache-dir", cacheDir] : ["--no-cache-dir"]), "--no-warnings", "--no-progress", "--no-playlist",
+    "--js-runtimes", `node:${process.execPath}`, "--socket-timeout", "15", "--retries", "1", "--extractor-retries", "1", ...extra,
+  ]
+}
+
+// Reachability of the PO token provider for /api/music/health; never fails the health check.
+export async function potStatus(pot = potConfig(), fetcher = fetch) {
+  if (!pot.url) return { enabled: false }
+  try {
+    const response = await fetcher(`${pot.url}/ping`, { signal: AbortSignal.timeout(2000) })
+    const body = response.ok ? await response.json() : null
+    return body?.version ? { enabled: true, ok: true, version: String(body.version) } : { enabled: true, ok: false, error: `HTTP ${response.status}` }
+  } catch (error) {
+    return { enabled: true, ok: false, error: error?.name === "TimeoutError" ? "timeout" : String(error?.cause?.code || error?.message || error) }
+  }
+}
+
 function createCliRunner(binary, cacheDir) {
   return (args, timeout = 60_000) => new Promise((resolveResult, reject) => {
-    execFile(binary, [
-      "--ignore-config", "--no-plugin-dirs", ...(cacheDir ? ["--cache-dir", cacheDir] : ["--no-cache-dir"]), "--no-warnings", "--no-progress", "--no-playlist",
-      "--js-runtimes", `node:${process.execPath}`, "--socket-timeout", "15", "--retries", "1", "--extractor-retries", "1", ...args,
-    ], { timeout, maxBuffer: 8 * 1024 * 1024, windowsHide: true }, (error, stdout, stderr) => {
+    execFile(binary, cliArguments(args, { cacheDir }), { timeout, maxBuffer: 8 * 1024 * 1024, windowsHide: true }, (error, stdout, stderr) => {
       if (error) {
         const detail = stderr.trim().split("\n").filter((line) => line.startsWith("ERROR:")).pop()?.replace(/^ERROR:\s*/, "")
         reject(new MusicError(error.code === "ENOENT" ? "Falta yt-dlp en el servidor. Ejecuta npm run music:setup." : error.killed ? "YouTube ha tardado demasiado. Vuelve a intentarlo." : detail || "No se pudo obtener el audio de YouTube.", 502))
@@ -238,7 +272,50 @@ function joinCatalog(entry, signal) {
   })
 }
 
-export async function createMusicService({ dataDir, run, catalog, catalogGraceMs = CATALOG_GRACE_MS }) {
+/**
+ * YouTube answers that only change with another video (removed, private, region or age blocked, no audio). Anything
+ * else (timeouts, "not a bot" checks, 403s) is temporary: the same video usually works on retry.
+ */
+const UNPLAYABLE = /Video unavailable|Private video|has been removed|removed by the uploader|terminated|not available in your country|blocked it in your country|confirm your age|age[- ]restricted|inappropriate|This video is not available|members[- ]only|Join this channel|No se ha encontrado una URL de audio|Requested format is not available|No video formats found|Only images are available/i
+export const unplayable = (error) => UNPLAYABLE.test(String(error?.message ?? ""))
+/** YouTube's "Sign in to confirm you're not a bot" can hit one video while the rest play: another upload may work. */
+const BOT_CHECK = /confirm you.?re not a bot|Sign in to confirm/i
+const replaceable = (error) => unplayable(error) || BOT_CHECK.test(String(error?.message ?? ""))
+/** A failed resolution the client may retry: a JSON 503 with Retry-After (Cloudflare hides an origin 502's body). */
+const temporary = (error) => error instanceof MusicError && error.status < 500 ? error
+  : Object.assign(new MusicError(error?.message || "No se pudo obtener el audio de YouTube.", 503), { retryAfter: 5 })
+const fold = (value) => String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+const words = (value) => fold(value).replace(/[^a-z0-9ñ]+/g, " ").trim()
+/** Bracketed or " - " suffixes that name a release of the same recording, not a different song. */
+const TITLE_NOISE = /^(?:(?:\d{4} )?(?:remaster(?:ed|izad[oa])?|remasterizacion)(?: \d{4})?(?: version)?|official(?: music)?(?: video| audio)?|(?:video|audio)(?: oficial| official)?|oficial|lyrics?(?: video)?|letra|live|en (?:directo|vivo)|directo|hd|hq|4k|explicit|album version|single version|radio edit|(?:feat|ft|featuring)\b.*|con .+)$/
+export function songTitle(value) {
+  let title = fold(value)
+  for (let previous; previous !== title;) {
+    previous = title
+    title = title.replace(/\s*[([]([^()[\]]*)[)\]]\s*$/, (whole, inner) => TITLE_NOISE.test(words(inner)) ? "" : whole)
+      .replace(/\s+-\s+([^-]+)$/, (whole, tail) => TITLE_NOISE.test(words(tail)) ? "" : whole)
+      .replace(/\s+(?:feat|ft|featuring)\.?\s.*$/, "")
+  }
+  return words(title)
+}
+const primaryArtist = (track) => words(track?.artists?.find((artist) => artist?.name)?.name ?? String(track?.artist ?? "").split(/,|&|\s(?:feat\.?|ft\.?|x|y|and)\s/i)[0])
+/**
+ * Another upload counts as the same song only with the same title (release noise aside), the same main artist and
+ * nearly the same length, and only from an official source (Topic "Art Track" or official video).
+ */
+export function sameSong(known, song) {
+  const duration = Number(song?.duration_seconds)
+  return ["MUSIC_VIDEO_TYPE_ATV", "MUSIC_VIDEO_TYPE_OMV"].includes(song?.videoType)
+    && songTitle(song.title) !== "" && songTitle(song.title) === songTitle(known.title)
+    && primaryArtist(song) !== "" && primaryArtist(song) === primaryArtist(known)
+    && known.duration > 0 && duration > 0 && Math.abs(duration - known.duration) <= 3
+}
+
+/** Whole budget of one stream request, below Cloudflare's 100 s origin timeout (a 524 has no CORS headers). */
+export const STREAM_BUDGET_MS = 60_000
+const ATTEMPT_MS = 40_000
+
+export async function createMusicService({ dataDir, run, catalog, catalogGraceMs = CATALOG_GRACE_MS, streamBudgetMs = STREAM_BUDGET_MS }) {
   await mkdir(dataDir, { recursive: true })
   const libraryFile = resolve(dataDir, "library.json")
   let library
@@ -247,6 +324,12 @@ export async function createMusicService({ dataDir, run, catalog, catalogGraceMs
     library = { tracks: {}, likes: { track: [], album: [], artist: [] } }
   }
   library.playlists ??= []
+  // Unplayable video id -> the catalogue upload of the very same song that plays instead, kept across restarts.
+  // `alternates` came from 0.1.23's loose matching (any song of the artist with a similar length): dropped.
+  delete library.alternates
+  library.replacements ??= {}
+  // A bot check is about the server's IP, not the song: its replacement lasts a few hours, in memory only.
+  const botAlternates = new Map()
   let writing = Promise.resolve()
   const persist = () => {
     const contents = JSON.stringify(library, null, 2)
@@ -389,7 +472,7 @@ export async function createMusicService({ dataDir, run, catalog, catalogGraceMs
       return true
     }).slice(0, limit)
   }
-  const resolveAudio = (id, { refresh = false, background = false } = {}) => {
+  const resolveAudio = (id, { refresh = false, background = false, deadline = Date.now() + streamBudgetMs } = {}) => {
     if (refresh) streamCache.delete(id)
     const cached = streamCache.get(id)
     if (cached && cached.expires > Date.now()) return Promise.resolve(cached.stream)
@@ -402,11 +485,11 @@ export async function createMusicService({ dataDir, run, catalog, catalogGraceMs
       "--format", "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio[ext=mp3]/bestaudio[ext=ogg]/bestaudio[ext=opus]",
       ...(direct ? ["--extractor-args", "youtube:skip=hls"] : []),
       "--", `https://www.youtube.com/watch?v=${id}`,
-    ])
+    ], Math.max(5_000, Math.min(ATTEMPT_MS, deadline - Date.now())))
     // Direct audio avoids fetching an unused HLS manifest. A missing audio format
     // falls back to full extraction; explicit/media-error refreshes always use it.
     const promise = extract(!refresh).catch((error) => {
-      if (!refresh && /Requested format is not available|No video formats found|Only images are available/i.test(error.message)) return extract(false)
+      if (!refresh && deadline - Date.now() > 10_000 && /Requested format is not available|No video formats found|Only images are available/i.test(error.message)) return extract(false)
       throw error
     }).then((output) => {
       const info = JSON.parse(output)
@@ -425,20 +508,87 @@ export async function createMusicService({ dataDir, run, catalog, catalogGraceMs
     streams.set(id, promise)
     return promise
   }
+  /**
+   * Resolves a song's audio within one budget. A video YouTube will not play (removed, blocked, no audio) is
+   * replaced by the next catalogue match for the same title and artist, and that choice is remembered.
+   */
+  async function resolvePlayable(id, { refresh = false, background = false } = {}) {
+    const deadline = Date.now() + streamBudgetMs
+    const brief = botAlternates.get(id)
+    if (brief && brief.expires <= Date.now()) botAlternates.delete(id)
+    const alternate = library.replacements[id] ?? (brief?.expires > Date.now() ? brief.id : undefined)
+    if (alternate) {
+      try { return await resolveAudio(alternate, { refresh, background, deadline }) } catch (error) {
+        if (!replaceable(error)) throw temporary(error)
+        botAlternates.delete(id)
+        if (library.replacements[id]) { delete library.replacements[id]; await persist() }
+      }
+    }
+    try { return await resolveAudio(id, { refresh, background, deadline }) } catch (error) {
+      if (!replaceable(error)) throw temporary(error)
+      // Removed or blocked for good: 410. A bot check with no other upload that plays: try again later.
+      const giveUp = () => unplayable(error) ? new MusicError("Esta canción no está disponible en YouTube.", 410)
+        : Object.assign(new MusicError("YouTube pide verificar esta canción desde el servidor. Prueba más tarde.", 503), { retryAfter: 60 })
+      const known = metadata.get(`yt:${id}`) || library.tracks[`yt:${id}`]?.track
+      if (!known?.title || deadline - Date.now() < 10_000) throw giveUp()
+      let songs = []
+      try { songs = await fromCatalog("search", `${known.title} ${known.artist ?? ""}`.trim(), 30 * 60_000) } catch (lookup) { throw temporary(lookup) }
+      const candidates = (Array.isArray(songs) ? songs : []).filter((song) => playableSong(song) && song.videoId !== id && sameSong(known, song))
+        .sort((a, b) => (a.videoType === "MUSIC_VIDEO_TYPE_ATV" ? 0 : 1) - (b.videoType === "MUSIC_VIDEO_TYPE_ATV" ? 0 : 1)).slice(0, 2)
+      // No upload that is certainly the same song: fail (the app moves on) rather than play something else.
+      if (!candidates.length) console.warn(`[stream] ${id} sin sustituto seguro para «${known.title}» de ${known.artist}`)
+      for (const song of candidates) {
+        if (deadline - Date.now() < 5_000) break
+        try {
+          const stream = await resolveAudio(song.videoId, { background, deadline })
+          if (unplayable(error)) { library.replacements[id] = song.videoId; await persist() }
+          else {
+            botAlternates.set(id, { id: song.videoId, expires: Date.now() + 6 * 3600_000 })
+            if (botAlternates.size > 500) botAlternates.delete(botAlternates.keys().next().value)
+          }
+          console.warn(`[stream] ${id} no se puede reproducir (${error.message}); se usa ${song.videoId}`)
+          return stream
+        } catch (next) { if (!replaceable(next)) throw temporary(next) }
+      }
+      throw giveUp()
+    }
+  }
+  /**
+   * The full search asks YouTube Music for songs, albums and artists at once. When one of those lookups fails
+   * (YouTube answers some of them with "automated queries" 403s), the others are still shown; only when every
+   * requested lookup fails does the search fail.
+   */
+  async function searchParts(parts, signal) {
+    const settled = await Promise.allSettled(parts.map((part) => part ?? Promise.resolve([])))
+    if (signal?.aborted) throw aborted()
+    const requested = settled.filter((_, i) => parts[i])
+    if (requested.length && requested.every((r) => r.status === "rejected")) throw requested[0].reason
+    return settled.map((r) => (r.status === "fulfilled" && Array.isArray(r.value) ? r.value : []))
+  }
+  async function discover() {
+    try {
+      // One shared catalogue request per 15 min, independent of profiles or library size.
+      const discovery = mapHomeAlbums(await fromCatalog("home", "", 15 * 60_000))
+      if (discovery.newest.length || discovery.random.length) lastDiscovery = discovery
+      else catalogRequests.delete("home:")
+    } catch { /* The last good discovery remains usable during an outage. */ }
+    return lastDiscovery
+  }
+
   return {
     async health() {
-      const [version, source] = await Promise.all([run(["--version"], 15_000), fromCatalog("health", "", 60_000)])
-      return { ok: true, version, catalog: source, tracks: tracks().length }
+      const [version, source, pot] = await Promise.all([run(["--version"], 15_000), fromCatalog("health", "", 60_000), potStatus()])
+      return { ok: true, version, catalog: source, tracks: tracks().length, pot }
     },
     async search(query, type = "all", { signal } = {}) {
       if (!["all", "tracks", "albums", "artists"].includes(type)) throw new MusicError("Tipo de búsqueda no válido.")
       const { target, flat } = searchTarget(query)
       const text = target.slice("ytsearch12:".length)
-      const [result, albumResults, artistResults] = flat ? await Promise.all([
-        ["all", "tracks"].includes(type) ? fromCatalog("search", text, 60_000, signal) : [],
-        ["all", "albums"].includes(type) ? fromCatalog("searchAlbums", text, 60_000, signal) : [],
-        ["all", "artists"].includes(type) ? fromCatalog("searchArtists", text, 60_000, signal) : [],
-      ]) : [type === "artists" ? [] : [await fromCatalog("song", new URL(target).searchParams.get("v"), undefined, signal)], [], []]
+      const [result, albumResults, artistResults] = flat ? await searchParts([
+        ["all", "tracks"].includes(type) ? fromCatalog("search", text, 60_000, signal) : null,
+        ["all", "albums"].includes(type) ? fromCatalog("searchAlbums", text, 60_000, signal) : null,
+        ["all", "artists"].includes(type) ? fromCatalog("searchArtists", text, 60_000, signal) : null,
+      ], signal) : [type === "artists" ? [] : [await fromCatalog("song", new URL(target).searchParams.get("v"), undefined, signal)], [], []]
       const seen = new Set()
       const songs = result.filter((song) => {
         if (!playableSong(song) || seen.has(song.videoId)) return false
@@ -508,13 +658,10 @@ export async function createMusicService({ dataDir, run, catalog, catalogGraceMs
         seen.add(song.videoId); return true
       }).slice(0, 20).map((song) => remember(mapCatalogTrack(song)))
     },
+    /** Catalogue discovery for Home (new releases, random picks), shared by every profile. */
+    discovery: discover,
     async home() {
-      try {
-        // One shared catalogue request per 15 min, independent of profiles or library size.
-        const discovery = mapHomeAlbums(await fromCatalog("home", "", 15 * 60_000))
-        if (discovery.newest.length || discovery.random.length) lastDiscovery = discovery
-        else catalogRequests.delete("home:")
-      } catch { /* Existing library and last good discovery remain usable during an outage. */ }
+      await discover()
       const merge = (first, second) => {
         const unique = new Map()
         for (const album of [...first, ...second]) if (!unique.has(album.id)) unique.set(album.id, { ...album, starred: library.likes.album.includes(album.id) })
@@ -584,15 +731,21 @@ export async function createMusicService({ dataDir, run, catalog, catalogGraceMs
       if (entry) { entry.lastPlayed = Date.now(); if (submission) entry.plays++; await persist() }
     },
     async prepare(id) {
-      await resolveAudio(videoId(id), { background: true })
+      await resolvePlayable(videoId(id), { background: true })
       return { ok: true }
     },
     async stream(id, { refresh = false } = {}) {
       id = videoId(id)
-      const stream = await resolveAudio(id, { refresh })
+      const started = Date.now()
+      let stream
+      try { stream = await resolvePlayable(id, { refresh }) } catch (error) {
+        console.warn(`[stream] ${id} falló tras ${Date.now() - started} ms: ${error.status ?? "?"} ${String(error.message).slice(0, 200)}`)
+        throw error
+      }
       const known = metadata.get(`yt:${id}`) || library.tracks[`yt:${id}`]?.track
       // Preparation stays in RAM; only an actual playback becomes part of the library.
-      const track = remember(known?.metadataSource === "ytmusic" ? known : stream.track)
+      // With a replacement video the song keeps its own id (queues, likes and history refer to it).
+      const track = remember(known?.metadataSource === "ytmusic" ? known : stream.track.id === `yt:${id}` ? stream.track : { ...stream.track, ...known, id: `yt:${id}` })
       saveTrack(track)
       await persist()
       return { url: stream.url, track }
