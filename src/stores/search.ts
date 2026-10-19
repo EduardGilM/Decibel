@@ -2,7 +2,7 @@
 
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
-import { applyRecent, MAX_RECENT, recentItem, type RecentOp, type RecentRow } from "../lib/recent-searches.ts"
+import { applyRecent, MAX_RECENT, migrateSearchState, recentItem, type RecentOp, type RecentRow } from "../lib/recent-searches.ts"
 import type { DataSource, SearchFilter, Track } from "../lib/types"
 
 /**
@@ -53,7 +53,13 @@ export const useSearch = create<SearchState>()(persist((set) => {
       return { rows: { ...state.rows, [scope]: applyRecent(rows, queue, MAX_RECENT) }, queue: { ...state.queue, [scope]: queue } }
     }),
   }
-}, { name: "decibel-search", version: 1, partialize: ({ recent, rows, queue, seq }) => ({ recent, rows, queue, seq }) }))
+}, {
+  name: "decibel-search",
+  // 2 = 1 plus the migration that keeps 0.1.9's unversioned list (see migrateSearchState).
+  version: 2,
+  partialize: ({ recent, rows, queue, seq }) => ({ recent, rows, queue, seq }),
+  migrate: (state, version) => migrateSearchState(state, version) as unknown as SearchState,
+}))
 
 export const searchScope = (source: DataSource | null, server = "", username = "") => JSON.stringify([source, source === "mock" ? "" : server.replace(/\/+$/, ""), source === "subsonic" ? username : ""])
 

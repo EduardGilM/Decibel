@@ -59,34 +59,41 @@ export function activeLyricsLine(lines: LyricsLine[], position: number) {
 export function selectLyrics(records: LyricsRecord[], lookup: LyricsLookup): LyricsResult | null {
   const matches = records.filter((record) =>
     normalized(record.trackName) === normalized(lookup.title) && normalized(cleanArtist(record.artistName)) === normalized(lookup.artist),
-  )
-  const difference = (record: LyricsRecord) => lookup.duration > 0 ? Math.abs(record.duration - lookup.duration) : Infinity
-  matches.sort((a, b) => difference(a) - difference(b) || Number(!!b.syncedLyrics) - Number(!!a.syncedLyrics))
-  for (const record of matches) {
-    if (record.instrumental) return { id: record.id, instrumental: true, text: "", lines: [] }
-    const parsed = record.syncedLyrics ? parseLrc(record.syncedLyrics) : []
-    const text = record.plainLyrics?.trim() || parsed.map((line) => line.text).filter(Boolean).join("\n")
-    if (!text) continue
+  ).map((record) => {
+    const difference = lookup.duration > 0 ? Math.abs(record.duration - lookup.duration) : Infinity
+    const parsed = !record.instrumental && record.syncedLyrics ? parseLrc(record.syncedLyrics) : []
+    const text = record.instrumental ? "" : record.plainLyrics?.trim() || parsed.map((line) => line.text).filter(Boolean).join("\n")
     // A different recording can share the words but have different timings.
-    const lines = difference(record) <= 2 ? parsed : []
-    return { id: record.id, instrumental: false, text, lines }
-  }
-  return null
+    const lines = difference <= 2 && parsed.some((line) => line.text) ? parsed : []
+    const result = { id: record.id, instrumental: record.instrumental, text, lines }
+    return { result, difference, ready: difference <= 2 && (record.instrumental || lines.length > 0) }
+  }).filter(({ result }) => result.instrumental || result.text)
+  // A slightly closer plain record must not hide usable timings for the same recording.
+  matches.sort((a, b) => Number(b.ready) - Number(a.ready) || a.difference - b.difference)
+  return matches[0]?.result ?? null
 }
 
-const cache = new Map<string, { expires: number; result: LyricsResult | null }>()
+interface LyricsCacheEntry { expires: number; result: LyricsResult | null }
+type StoredLyrics = LyricsResult & { expires?: number }
+const cache = new Map<string, LyricsCacheEntry>()
 
-// Found lyrics also survive restarts (small LRU in localStorage), so reopening the app needs no network.
+// Keep lyrics across restarts, with an expiry so plain text can later gain timings.
 const STORE = "decibel-lyrics"
 const STORE_MAX = 40
-function stored(key: string): LyricsResult | undefined {
-  try { return (JSON.parse(globalThis.localStorage?.getItem(STORE) ?? "{}") as Record<string, LyricsResult>)[key] } catch { return undefined }
-}
-function store(key: string, result: LyricsResult) {
+function stored(key: string): LyricsCacheEntry | undefined {
   try {
-    const all = JSON.parse(globalThis.localStorage?.getItem(STORE) ?? "{}") as Record<string, LyricsResult>
+    const saved = (JSON.parse(globalThis.localStorage?.getItem(STORE) ?? "{}") as Record<string, StoredLyrics>)[key]
+    if (!saved) return undefined
+    // Legacy entries have no expiry: recheck them once, retaining the text as an offline fallback.
+    const { expires = 0, ...result } = saved
+    return { expires, result }
+  } catch { return undefined }
+}
+function store(key: string, result: LyricsResult, expires: number) {
+  try {
+    const all = JSON.parse(globalThis.localStorage?.getItem(STORE) ?? "{}") as Record<string, StoredLyrics>
     delete all[key]
-    all[key] = result
+    all[key] = { ...result, expires }
     const keys = Object.keys(all)
     for (const old of keys.slice(0, Math.max(0, keys.length - STORE_MAX))) delete all[old]
     globalThis.localStorage?.setItem(STORE, JSON.stringify(all))
@@ -120,10 +127,8 @@ export async function findLyrics(track: Track, signal?: AbortSignal): Promise<Ly
   const lookup = lyricsLookup(track)
   if (!lookup.title || !lookup.artist) return null
   const key = JSON.stringify(lookup)
-  const cached = cache.get(key)
-  if (cached && cached.expires > Date.now()) return cached.result
-  const saved = stored(key)
-  if (saved) { cache.set(key, { result: saved, expires: Date.now() + 6 * 60 * 60_000 }); return saved }
+  const cached = cache.get(key) ?? stored(key)
+  if (cached && cached.expires > Date.now()) { cache.set(key, cached); return cached.result }
   const combined = AbortSignal.any([AbortSignal.timeout(20_000), ...(signal ? [signal] : [])])
   async function request(route: string, params: URLSearchParams): Promise<LyricsRecord | LyricsRecord[] | null> {
     const response = await fetch(`https://lrclib.net/api/${route}?${params}`, { signal: combined })
@@ -133,15 +138,28 @@ export async function findLyrics(track: Track, signal?: AbortSignal): Promise<Ly
   }
   const params = new URLSearchParams({ track_name: lookup.title, artist_name: lookup.artist })
   if (lookup.duration > 0 && lookup.duration <= 3600) params.set("duration", String(Math.round(lookup.duration)))
-  const exact = await request("get", params)
-  let result = exact && !Array.isArray(exact) ? selectLyrics([exact], lookup) : null
-  if (!result) {
-    params.delete("duration")
-    const records = await request("search", params)
-    result = Array.isArray(records) ? selectLyrics(records, lookup) : null
+  let result: LyricsResult | null = null
+  let failed = false
+  try {
+    const exact = await request("get", params)
+    const candidates = exact && !Array.isArray(exact) ? [exact] : []
+    result = selectLyrics(candidates, lookup)
+    if (!result?.instrumental && !result?.lines.length) {
+      params.delete("duration")
+      const records = await request("search", params)
+      if (Array.isArray(records)) result = selectLyrics([...candidates, ...records], lookup)
+    }
+  } catch (error) {
+    if (signal?.aborted || (!result && !cached?.result)) throw error
+    failed = true // Keep available lyrics when the optional sync search or a refresh fails.
   }
-  cache.set(key, { result, expires: Date.now() + (result ? 6 * 60 * 60_000 : 10 * 60_000) })
-  if (result) store(key, result)
+  signal?.throwIfAborted()
+  const saved = cached?.result
+  if (!result || (!result.instrumental && !result.lines.length && saved?.lines.length)) result = saved ?? result
+  const resolved = result && (result.instrumental || result.lines.length > 0)
+  const expires = Date.now() + (failed ? 60_000 : resolved ? 6 * 60 * 60_000 : 10 * 60_000)
+  cache.set(key, { result, expires })
+  if (result) store(key, result, expires)
   if (cache.size > 100) cache.delete(cache.keys().next().value!)
   return result
 }

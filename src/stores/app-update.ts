@@ -1,14 +1,16 @@
 "use client"
 
 import { create } from "zustand"
-import { androidProgress, androidUpdate, dayKey, installDesktopUpdate, snoozed, updateBase, type AndroidUpdate, type DesktopUpdateLike, type UpdatePhase } from "@/lib/app-update"
-import { APP_VERSION } from "@/lib/version"
+import { androidProgress, androidUpdate, dayKey, installDesktopUpdate, snoozed, updateBase, type AndroidUpdate, type DesktopUpdateLike, type UpdatePhase } from "../lib/app-update.ts"
+import { APP_VERSION } from "../lib/version.ts"
 
 export type UpdateOffer = { kind: "android"; version: string; apk: AndroidUpdate } | { kind: "desktop"; version: string; update: DesktopUpdateLike }
 export type { UpdatePhase }
 
 const SNOOZE = "decibel-update-snooze"
-const CHECK_EVERY = 6 * 3600_000
+const CHECK_EVERY = 15 * 60_000
+const CHECK_COOLDOWN = 60_000
+const CHECK_TIMEOUT = 15_000
 
 interface UpdateState {
   offer: UpdateOffer | null
@@ -40,8 +42,12 @@ export function openDownloads() {
 }
 
 let poll: ReturnType<typeof setInterval> | null = null
+let checking = false
 const stopPoll = () => { if (poll) clearInterval(poll); poll = null }
 const busy = (phase: UpdatePhase) => phase === "downloading" || phase === "installing" || phase === "permission"
+const closeOffer = (offer: UpdateOffer | null) => {
+  if (offer?.kind === "desktop") void offer.update.close?.().catch(() => {})
+}
 
 /**
  * App updates (native apps only; the browser never sees any of this). «Actualizar» updates in place: Android
@@ -52,25 +58,34 @@ const busy = (phase: UpdatePhase) => phase === "downloading" || phase === "insta
 export const useAppUpdate = create<UpdateState>()((set, get) => ({
   offer: null, open: false, phase: "idle", progress: null, error: null, lastCheck: 0,
   async check() {
-    if (!isNativeApp() || busy(get().phase)) return
+    if (!isNativeApp() || checking || busy(get().phase) || navigator.onLine === false) return
     const base = updateBase()
     if (!base) return
+    checking = true
     set({ lastCheck: Date.now() })
     try {
       let offer: UpdateOffer | null = null
       if (window.DecibelNative) {
-        const res = await fetch(`${base}/api/app/version`, { cache: "no-store" })
-        const apk = res.ok ? androidUpdate(await res.json(), APP_VERSION, base) : null
+        const res = await fetch(`${base}/api/app/version`, { cache: "no-store", signal: AbortSignal.timeout(CHECK_TIMEOUT) })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const apk = androidUpdate(await res.json(), APP_VERSION, base)
         if (apk) offer = { kind: "android", version: apk.version, apk }
       } else {
         const { check } = await import("@tauri-apps/plugin-updater")
-        const update = await check()
+        const update = await check({ timeout: CHECK_TIMEOUT })
         if (update) offer = { kind: "desktop", version: update.version, update }
       }
-      if (!offer) return set({ offer: null })
-      const fresh = get().offer?.version !== offer.version
-      set({ offer, open: get().open || (fresh && !snoozed(localStorage.getItem(SNOOZE), offer.version)) })
+      // An install may have started while the request was in flight.
+      if (busy(get().phase)) { closeOffer(offer); return }
+      const previous = get().offer
+      if (!offer) set({ offer: null, open: false })
+      else {
+        const fresh = previous?.version !== offer.version
+        set({ offer, open: get().open || (fresh && !snoozed(localStorage.getItem(SNOOZE), offer.version)) })
+      }
+      closeOffer(previous)
     } catch { /* offline or no updater configured: next check */ }
+    finally { checking = false }
   },
   show: () => { if (get().offer) set({ open: true }) },
   later() {
@@ -111,18 +126,30 @@ export const useAppUpdate = create<UpdateState>()((set, get) => ({
   },
 }))
 
-/** Checks after start-up, every few hours and when the app comes back to the foreground. */
+/** Checks while visible: after start-up, every 15 minutes, on return and on reconnect. */
 export function startUpdateChecks(): () => void {
   if (!isNativeApp()) return () => {}
-  const run = () => void useAppUpdate.getState().check()
+  const run = (reconnected = false) => {
+    if (document.visibilityState !== "visible" || navigator.onLine === false) return
+    const state = useAppUpdate.getState()
+    if (reconnected || !state.lastCheck || Date.now() - state.lastCheck >= CHECK_COOLDOWN) void state.check()
+  }
   const first = setTimeout(run, 4000) // never competes with the first screen
   const every = setInterval(run, CHECK_EVERY)
   const back = () => {
     if (document.visibilityState !== "visible") return
     const state = useAppUpdate.getState()
     if (state.phase === "permission") return state.resume() // back from Settings
-    if (Date.now() - state.lastCheck > 3600_000) run()
+    run()
   }
+  const online = () => run(true) // retry even if a recent request failed while losing the connection
   document.addEventListener("visibilitychange", back)
-  return () => { clearTimeout(first); clearInterval(every); document.removeEventListener("visibilitychange", back) }
+  window.addEventListener("focus", back)
+  window.addEventListener("online", online)
+  return () => {
+    clearTimeout(first); clearInterval(every)
+    document.removeEventListener("visibilitychange", back)
+    window.removeEventListener("focus", back)
+    window.removeEventListener("online", online)
+  }
 }

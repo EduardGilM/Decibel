@@ -1,5 +1,5 @@
 // Publishes a release to the Decibel server's releases directory (served at /download, /releases/*, /api/app/version).
-//   node scripts/release.mjs --version 0.1.9 --apk A.apk --windows S.exe --appimage D.AppImage --deb D.deb [--notes "…"] [--publish]
+//   node scripts/release.mjs --version 0.1.9 --apk A.apk --windows S.exe --deb D.deb [--notes "…"] [--publish]
 // Environment (nothing is hard-coded):
 //   DECIBEL_PUBLIC_URL      https base of the server, e.g. https://music.example.com
 //   DECIBEL_RELEASE_TARGET  scp destination of the releases directory, e.g. myserver:/srv/decibel-releases
@@ -16,7 +16,7 @@ import { parseArgs } from "node:util"
 import { verifyUpdaterSignature } from "./updater-signature.mjs"
 
 const { values } = parseArgs({ options: {
-  version: { type: "string" }, apk: { type: "string" }, windows: { type: "string" }, appimage: { type: "string" }, deb: { type: "string" },
+  version: { type: "string" }, apk: { type: "string" }, windows: { type: "string" }, deb: { type: "string" },
   notes: { type: "string", default: "" }, out: { type: "string" }, publish: { type: "boolean", default: false },
 } })
 const fail = (message) => { console.error(message); process.exit(1) }
@@ -32,7 +32,6 @@ const sha256 = (file) => createHash("sha256").update(readFileSync(file)).digest(
 const entries = [
   ["android", values.apk, `Decibel-${version}.apk`],
   ["windows", values.windows, `Decibel-${version}-setup.exe`],
-  ["linux-appimage", values.appimage, `Decibel-${version}.AppImage`],
   ["linux-deb", values.deb, `Decibel-${version}.deb`],
 ].filter(([, source]) => source)
 if (!entries.length) fail("Pass at least one artifact.")
@@ -74,7 +73,8 @@ const url = (kind) => `${base}/releases/${encodeURIComponent(files[kind].name)}?
 const platforms = {}
 const platform = (keys, kind) => { if (signatures[kind]) for (const k of keys) platforms[k] = { signature: signatures[kind], url: url(kind) } }
 platform(["windows-x86_64", "windows-x86_64-nsis"], "windows")
-platform(["linux-x86_64", "linux-x86_64-appimage"], "linux-appimage")
+// No AppImage any more (only .deb). Never map "linux-x86_64": an installed AppImage falls back to that key and
+// would overwrite itself with a .deb. Without its key the AppImage updater just finds no update (silent).
 platform(["linux-x86_64-deb"], "linux-deb")
 writeFileSync(join(out, "latest.json"), JSON.stringify({ version, notes: values.notes, pub_date: date, platforms }, null, 2) + "\n")
 // Hashes for whoever wants to check a download (not linked from the page).

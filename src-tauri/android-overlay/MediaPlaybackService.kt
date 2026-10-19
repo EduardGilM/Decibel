@@ -8,11 +8,18 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.content.pm.PackageManager
 import android.graphics.drawable.Icon
+import android.media.MediaDescription
+import android.media.browse.MediaBrowser
+import android.media.session.MediaSessionManager
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.Process
+import android.service.media.MediaBrowserService
 import android.util.Log
 
 /**
@@ -142,7 +149,7 @@ class MediaPlaybackService : Service() {
 
   override fun onTaskRemoved(rootIntent: Intent?) {
     // App swiped away from recents: the WebView is gone with it, so stop cleanly.
-    DecibelMedia.release()
+    DecibelMedia.detach()
     stopSelf()
     super.onTaskRemoved(rootIntent)
   }
@@ -152,6 +159,82 @@ class MediaPlaybackService : Service() {
     foreground = false
     main.removeCallbacksAndMessages(null)
     getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
+    super.onDestroy()
+  }
+}
+
+/**
+ * Android Auto renders its own driving UI from this browser tree. Playback stays in the phone's
+ * authenticated WebView; binding the service alone never launches an Activity or starts audio.
+ * Kept in this file so the existing overlay/release copy step includes both services.
+ */
+class AutoBrowserService : MediaBrowserService() {
+  companion object {
+    private var instance: AutoBrowserService? = null
+    val connected get() = instance != null
+    fun catalogChanged() {
+      instance?.let { service ->
+        for (parent in service.parents.toList()) service.notifyChildrenChanged(parent)
+      }
+    }
+  }
+
+  private val parents = linkedSetOf("root")
+
+  override fun onCreate() {
+    super.onCreate()
+    instance = this
+    sessionToken = DecibelMedia.initialize(this).sessionToken
+  }
+
+  override fun onGetRoot(clientPackageName: String, clientUid: Int, rootHints: Bundle?): BrowserRoot? {
+    // The package string is provided by the caller: always match it to the Binder UID first.
+    if (packageManager.getPackagesForUid(clientUid)?.contains(clientPackageName) != true) return null
+    val own = clientUid == Process.myUid() || clientUid == Process.SYSTEM_UID
+    val trustedController = Build.VERSION.SDK_INT >= 28 &&
+      getSystemService(MediaSessionManager::class.java).isTrustedForMediaControl(
+        MediaSessionManager.RemoteUserInfo(clientPackageName, -1, clientUid))
+    val googleHost = clientPackageName in setOf(
+      "com.google.android.projection.gearhead", "com.google.android.googlequicksearchbox"
+    ) && packageManager.checkSignatures(clientPackageName, "com.google.android.gms") == PackageManager.SIGNATURE_MATCH
+    if (!own && !trustedController && !googleHost) return null
+    return BrowserRoot("root", Bundle().apply {
+      putBoolean("android.media.browse.CONTENT_STYLE_SUPPORTED", true)
+      putInt("android.media.browse.CONTENT_STYLE_BROWSABLE_HINT", 1)
+      putInt("android.media.browse.CONTENT_STYLE_PLAYABLE_HINT", 1)
+    })
+  }
+
+  override fun onLoadChildren(parentId: String, result: Result<MutableList<MediaBrowser.MediaItem>>) {
+    // Track a bounded set of visited folders to refresh the car after login or a queue edit.
+    if (parents.size < 200) parents.add(parentId)
+    result.detach()
+    DecibelMedia.requestAuto("browse", parentId) { response ->
+      if (response == null || response.has("error")) {
+        DecibelMedia.autoFailure(if (DecibelMedia.autoReady) "No se pudo cargar la biblioteca. Inténtalo de nuevo"
+          else "Abre Decibel en el teléfono antes de conducir")
+        result.sendResult(null)
+      } else {
+        DecibelMedia.autoRecovered()
+        val items = response.optJSONArray("items")
+        val children = mutableListOf<MediaBrowser.MediaItem>()
+        if (items != null) for (i in 0 until minOf(items.length(), 81)) {
+          val item = items.optJSONObject(i) ?: continue
+          val id = item.optString("id")
+          if (id.isEmpty()) continue
+          val description = MediaDescription.Builder().setMediaId(id)
+            .setTitle(item.optString("title").take(200))
+            .setSubtitle(item.optString("subtitle").take(200)).build()
+          children.add(MediaBrowser.MediaItem(description, if (item.optBoolean("browsable"))
+            MediaBrowser.MediaItem.FLAG_BROWSABLE else MediaBrowser.MediaItem.FLAG_PLAYABLE))
+        }
+        result.sendResult(children)
+      }
+    }
+  }
+
+  override fun onDestroy() {
+    instance = null
     super.onDestroy()
   }
 }

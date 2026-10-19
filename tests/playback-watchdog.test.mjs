@@ -104,3 +104,47 @@ test("advanced(): moved on vs stopped at the end of the queue", () => {
   assert.equal(advanced({ playbackId: 3 }, { playbackId: 3, loadingRecommendations: true }), true)
   assert.equal(advanced({ playbackId: 3 }, { playbackId: 3, loadingRecommendations: false }), false)
 })
+
+test("throttled stream (stop-and-go crumbs of audio) counts as stuck: retry, not endless silence", () => {
+  const { run } = rig()
+  run(1, { resolved: true })
+  for (let p = 1; p <= 20; p++) run(1, { position: p })
+  // Like a throttled audio URL: a fraction of a second every few seconds, which used to restart the clock forever.
+  const actions = []
+  let p = 20
+  for (let i = 0; i < 40 && !actions.length; i++) { if (i % 3 === 0) p += 0.3; actions.push(...run(1, { position: p })) }
+  assert.equal(actions[0]?.type, "retry")
+  assert.equal(actions[0].refresh, true)
+  assert.ok(actions[0].at <= 21_000 + 16_000, `retry too late: ${actions[0].at}`)
+})
+
+test("short bursts of real playback between long stalls do not reset the clock; a healthy stretch does", () => {
+  const stopGo = rig()
+  stopGo.run(1, { resolved: true })
+  let p = 0
+  const actions = []
+  // 2 s playing, 4 s stalled, again and again: mostly silence.
+  for (let i = 0; i < 60 && !actions.length; i++) { if (i % 6 < 2) p += 1; actions.push(...stopGo.run(1, { position: p })) }
+  assert.equal(actions[0]?.type, "retry")
+  const recovered = rig()
+  recovered.run(1, { resolved: true })
+  p = 0
+  const none = []
+  // 8 s stalled, then plays fine for a while, then 8 s stalled again: real buffering, never a retry.
+  for (let i = 0; i < 8; i++) none.push(...recovered.run(1, { position: p }))
+  for (let i = 0; i < 10; i++) none.push(...recovered.run(1, { position: ++p }))
+  for (let i = 0; i < 8; i++) none.push(...recovered.run(1, { position: p }))
+  for (let i = 0; i < 10; i++) none.push(...recovered.run(1, { position: ++p }))
+  assert.deepEqual(none, [])
+})
+
+test("seeking (back or ahead) is a new starting point, not progress or a stall", () => {
+  const { run } = rig()
+  run(1, { resolved: true })
+  for (let p = 1; p <= 30; p++) run(1, { position: p })
+  assert.deepEqual(run(10, { position: 30 }), [])
+  // Seek back: the 10 stuck seconds before it are forgotten.
+  assert.deepEqual(run(1, { position: 5 }), [])
+  assert.deepEqual(run(11, { position: 5 }), [])
+  assert.equal(run(1, { position: 5 })[0]?.type, "retry")
+})

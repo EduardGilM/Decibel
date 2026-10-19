@@ -1,7 +1,7 @@
 "use client"
 
 import { useRouter } from "next/navigation"
-import { ArrowDownCircle, History, KeyRound, LogOut, Palette, Server, SlidersHorizontal, Users } from "lucide-react"
+import { ArrowDownCircle, History, Import, KeyRound, LogOut, Palette, Server, SlidersHorizontal, Users } from "lucide-react"
 import { Dialog as SheetPrimitive } from "radix-ui"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Sheet, SheetDescription, SheetTitle } from "@/components/ui/sheet"
@@ -200,6 +200,7 @@ export function ProfileDrawer() {
               <GlassGroup>
                 <GlassButtonRow icon={<History />} onClick={() => go("/history/")}>Historial</GlassButtonRow>
                 <GlassButtonRow icon={<ArrowDownCircle />} onClick={() => go("/downloads/")}>Descargas</GlassButtonRow>
+                {profile && mode === "ytdlp" && <GlassButtonRow icon={<Import />} onClick={() => { close(); useUi.setState({ spotifyOpen: true }) }}>Importar de Spotify</GlassButtonRow>}
               </GlassGroup>
               <GlassGroup>
                 <GlassButtonRow icon={<SlidersHorizontal />} onClick={() => { close(); useUi.setState({ settingsOpen: true }) }}>Reproducción</GlassButtonRow>

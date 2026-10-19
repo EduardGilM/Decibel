@@ -1,7 +1,7 @@
 "use client"
 
 import { useRouter } from "next/navigation"
-import { ArrowDownCircle, History, Keyboard, KeyRound, LogOut, Palette, Server, SlidersHorizontal, Users } from "lucide-react"
+import { ArrowDownCircle, History, Import, Keyboard, KeyRound, LogOut, Palette, Server, SlidersHorizontal, Users } from "lucide-react"
 import type { ReactNode } from "react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
@@ -69,6 +69,11 @@ export function AccountMenu({ className }: { className?: string }) {
           {profile && (
             <>
               <DropdownMenuSeparator />
+              {mode === "ytdlp" && (
+                <DropdownMenuItem onSelect={() => useUi.setState({ spotifyOpen: true })}>
+                  <Import /> Importar de Spotify
+                </DropdownMenuItem>
+              )}
               {profile.role === "admin" && (
                 <DropdownMenuItem onSelect={() => router.push("/admin/")}>
                   <Users /> Administrar perfiles

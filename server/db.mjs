@@ -137,6 +137,17 @@ const MIGRATIONS = [
      cleared_at INTEGER NOT NULL,
      PRIMARY KEY (user_id, source)
    );`,
+  // Spotify import: server-wide settings (the Spotify app's Client ID) and Spotify → YouTube Music matches
+  // shared by every import (track_json NULL = not found), so a retried import does not search again.
+  `CREATE TABLE IF NOT EXISTS server_settings (
+     key TEXT PRIMARY KEY,
+     value TEXT NOT NULL
+   );
+   CREATE TABLE IF NOT EXISTS spotify_matches (
+     key TEXT PRIMARY KEY,
+     track_json TEXT,
+     checked_at INTEGER NOT NULL
+   );`,
 ]
 
 /** Opens (and migrates) the profiles database. `:memory:` for tests. */

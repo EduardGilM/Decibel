@@ -23,4 +23,38 @@ if "REQUEST_INSTALL_PACKAGES" not in s:
     assert "REQUEST_INSTALL_PACKAGES" in s
     open(p + ".tmp", "w").write(s)
     import os; os.replace(p + ".tmp", p)
-print("manifest ok")
+# Android Auto (bridge 7). Works both on a fresh Tauri manifest and on an already patched project.
+# The descriptor is generated here because release-all copies the Kotlin overlay and invokes this script.
+from pathlib import Path
+import os
+if "com.google.android.projection.gearhead" not in s:
+    s = s.replace("    <application", '''    <queries>
+        <package android:name="com.google.android.projection.gearhead" />
+        <package android:name="com.google.android.googlequicksearchbox" />
+        <package android:name="com.google.android.gms" />
+    </queries>
+
+    <application''', 1)
+if "AutoBrowserService" not in s:
+    s = s.replace('''        <provider''', '''        <service
+            android:name=".AutoBrowserService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.media.browse.MediaBrowserService" />
+            </intent-filter>
+        </service>
+        <meta-data android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
+
+        <provider''', 1)
+    assert 'android:name=".AutoBrowserService"' in s
+Path(p + ".tmp").write_text(s)
+os.replace(p + ".tmp", p)
+resource = Path(p).parent / "res" / "xml" / "automotive_app_desc.xml"
+resource.parent.mkdir(parents=True, exist_ok=True)
+resource.write_text('''<?xml version="1.0" encoding="utf-8"?>
+<automotiveApp>
+    <uses name="media" />
+</automotiveApp>
+''')
+print("manifest ok (Android Auto)")

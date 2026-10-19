@@ -67,6 +67,8 @@ export function TopSearch({ mobile = false, className, placeholder = "¿Qué qui
   const loading = !!query && !current?.tracks && !current?.error
   const predicted = loading ? recentMatch(recentTracks, query) : tracks[active >= 0 ? active : 0]
   usePrepareTrack(open && (query || active >= 0) ? predicted : undefined)
+  // The list shown is the profile's (server) list: refresh it every time the dropdown opens, on any device.
+  useEffect(() => { if (open) void syncRecentSearches() }, [open])
 
   // Back/forward and shared links update the draft, without submitting further edits.
   useEffect(() => {
@@ -175,7 +177,7 @@ export function TopSearch({ mobile = false, className, placeholder = "¿Qué qui
           type="search"
           value={q}
           onChange={(e) => change(e.target.value)}
-          onFocus={() => { setOpen(true); void syncRecentSearches() }}
+          onFocus={() => setOpen(true)}
           onKeyDown={(e) => {
             if (e.nativeEvent.isComposing) return
             if (e.key === "Escape") { e.preventDefault(); setOpen(false); setActive(-1) }

@@ -15,12 +15,13 @@ export class ApiError extends Error {
   }
 }
 
-/** Cookie sessions for the web plus server-bound Bearer tokens for native clients. */
+/** Cookie sessions for the web plus server-bound Bearer tokens for native clients. A Blob body is sent as is (uploads). */
 export async function api<T>(path: string, { method = "GET", body, signal }: { method?: string; body?: unknown; signal?: AbortSignal } = {}): Promise<T> {
   let response: Response
   const base = serverBase()
   const authorization = sessionHeaders(base)
-  const timeout = AbortSignal.timeout(10_000)
+  const file = body instanceof Blob
+  const timeout = AbortSignal.timeout(file ? 120_000 : 10_000)
   const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout
   let data
   try {
@@ -29,8 +30,8 @@ export async function api<T>(path: string, { method = "GET", body, signal }: { m
       credentials: "include",
       cache: "no-store",
       signal: requestSignal,
-      headers: { ...authorization, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      headers: { ...authorization, ...(body === undefined ? {} : { "Content-Type": file ? body.type || "application/octet-stream" : "application/json" }) },
+      body: body === undefined ? undefined : file ? body : JSON.stringify(body),
     })
     try { data = await response.json() } catch (error) {
       if (requestSignal.aborted) throw requestSignal.reason ?? error

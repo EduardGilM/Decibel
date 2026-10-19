@@ -13,9 +13,12 @@ import { handlePodcastApi } from "./podcast-api.mjs"
 import { parsePodcastFeed } from "./podcast-feed.mjs"
 import { createReleases } from "./releases.mjs"
 import { createRequestSecurity } from "./request-security.mjs"
+import { createDevices } from "./devices.mjs"
+import { createSpotifyImport } from "./spotify.mjs"
 
-export async function createApp({ music, publicDir, allowedOrigins = [], artwork = createArtworkService(), profiles, podcasts = profiles ? createPodcastService({ db: profiles.db }) : undefined, releases = createReleases({ dir: undefined }), trustProxy, now = Date.now }) {
+export async function createApp({ music, publicDir, allowedOrigins = [], artwork = createArtworkService(), profiles, podcasts = profiles ? createPodcastService({ db: profiles.db }) : undefined, releases = createReleases({ dir: undefined }), spotify = profiles ? createSpotifyImport({ db: profiles.db, library: profiles.library, search: (query) => music.search(query, "tracks"), allowedOrigins }) : undefined, trustProxy, now = Date.now }) {
   const security = createRequestSecurity({ trustProxy })
+  const devices = createDevices()
   let healthCache
   const musicHealth = () => {
     if (healthCache?.expires > now()) return healthCache.promise
@@ -53,10 +56,14 @@ export async function createApp({ music, publicDir, allowedOrigins = [], artwork
       const json = (value, status = 200) => { res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" }); res.end(JSON.stringify(value)) }
       let user
       if (profiles) {
+        // The Spotify consent screen comes back without a session; its one-time state names the profile.
+        if (await spotify?.callback(req, res, url)) return
         // Profiles: every /api route needs a session except login and health.
         if (await profiles.handle(req, res, url, json)) return
         user = profiles.guard(req, res, url.pathname)
       }
+      if (await spotify?.handle(req, url, json, user)) return
+      if (await devices.handle(req, url, json, user)) return
       if (await handlePodcastApi(req, res, url, json, user, podcasts)) return
       if (!url.pathname.startsWith("/api/music/")) throw new MusicError("Ruta no encontrada.", 404)
       // YouTube audio is streamed only; offline copies are refused here as well as in the client.
@@ -77,7 +84,12 @@ export async function createApp({ music, publicDir, allowedOrigins = [], artwork
             return
           }
           case "health": return json(await musicHealth())
-          case "search": return json(await music.search(url.searchParams.get("q"), url.searchParams.get("type") || "all"))
+          case "search": {
+            // A client that goes away (new keystroke, Enter, closed page) frees its YouTube Music slot.
+            const gone = new AbortController()
+            res.once("close", () => { if (!res.writableFinished) gone.abort() })
+            return json(await music.search(url.searchParams.get("q"), url.searchParams.get("type") || "all", { signal: gone.signal }))
+          }
           case "recommendations": return json(await music.recommendations(url.searchParams.get("id")))
           case "home": return json(await music.home())
           case "albums": return json(music.albums(url.searchParams.get("type")))
@@ -99,6 +111,7 @@ export async function createApp({ music, publicDir, allowedOrigins = [], artwork
       throw new MusicError("Ruta no encontrada.", 404)
     } catch (error) {
       if (res.headersSent) { res.destroy(); return }
+      if (res.destroyed || res.writableEnded) return // the client already left (an aborted search)
       const status = error instanceof MusicError ? error.status : 500
       if (error.retryAfter) res.setHeader("Retry-After", String(error.retryAfter))
       if (status === 500) console.error(error)

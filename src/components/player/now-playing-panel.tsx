@@ -64,11 +64,11 @@ export function NowPlayingPanel() {
           </div>
         </div>
         <div className="flex flex-col gap-3 px-4 pb-4">
-          <PanelUpNext />
           {/* Lyrics preview: card with a faint, darkened hint of the cover colour. */}
           {lyricsOpen && !track.podcast && <div className="overflow-hidden rounded-xl bg-(--lyrics-bg) [--lyrics-bg:rgb(255_255_255/0.06)]" style={tint ? { "--lyrics-bg": `color-mix(in oklab, ${tint} 14%, rgb(255 255 255 / 0.05))` } as CSSProperties : undefined}>
             <LyricsPanel track={track} preview scrollable className="px-4 py-4" />
           </div>}
+          <PanelUpNext />
         </div>
       </ScrollArea>
     </aside>

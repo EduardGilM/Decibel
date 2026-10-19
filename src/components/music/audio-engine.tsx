@@ -9,7 +9,7 @@ import { useSettings } from "@/stores/settings"
 import { armWindow, fadeGains, isIOS, nextAutoTrack } from "@/lib/audio/transition"
 import { advanced, PlaybackWatchdog, type WatchdogAction } from "@/lib/audio/watchdog"
 import { measureLoudness, trackGain, useGainKey } from "./normalization"
-import { useKeyboardShortcuts } from "./keyboard-shortcuts"
+import { useDevices } from "@/stores/devices"
 import { useListenTracker } from "./use-listen-tracker"
 import type { Track } from "@/lib/types"
 import { prepareQueuedTracks, upcomingTracks } from "@/lib/prepare-queue"
@@ -24,6 +24,22 @@ function clearDeck(deck: HTMLAudioElement | null) {
   deck.pause()
   deck.removeAttribute("src")
   deck.load()
+}
+
+/**
+ * Whether the active deck has stopped buffering for a while. A struggling stream flaps waiting/canplay
+ * several times a second; side work (preparing the queue, arming gapless, radio) follows this instead of
+ * `buffering`, so it neither restarts on every flap (a burst of aborted requests) nor competes with the
+ * stream. Starts again from "not settled" on every new playback.
+ */
+function useSettled(buffering: boolean, playback: unknown, settleMs = 1500, unsettleMs = 4000) {
+  const [settled, setSettled] = useState(false)
+  useEffect(() => setSettled(false), [playback])
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSettled(!buffering), buffering ? unsettleMs : settleMs)
+    return () => window.clearTimeout(timer)
+  }, [buffering, playback, settleMs, unsettleMs])
+  return settled
 }
 
 /**
@@ -53,6 +69,8 @@ export function AudioEngine() {
   const provider = useProvider()
   const mediaCover = useAuthenticatedArtwork(provider.coverUrl(track?.coverArt, 512))
   const [retry, setRetry] = useState(0)
+  // A new playback or a watchdog retry starts unsettled again.
+  const settled = useSettled(buffering, `${playbackId}:${track?.id ?? ""}:${retry}`)
   const ready = useRef(false)
   const failed = useRef(false)
   const refreshUrl = useRef(false)
@@ -66,7 +84,6 @@ export function AudioEngine() {
   const armNow = usePlayer((s) => s.duration > 0 && s.duration - s.position < armWindow(crossfade))
   const gainKey = useGainKey(track)
 
-  useKeyboardShortcuts()
   useListenTracker()
   usePodcastSession()
 
@@ -117,8 +134,12 @@ export function AudioEngine() {
   // register element
   useEffect(() => {
     ref.current = decks.current[0]
-    usePlayer.setState({ audio: ref.current, isPlaying: false })
+    usePlayer.setState({ audio: ref.current })
+    const elements = [...decks.current]
     return () => {
+      ready.current = false
+      ref.current = null
+      for (const element of elements) clearDeck(element)
       usePlayer.setState({ audio: null })
     }
   }, [])
@@ -130,7 +151,7 @@ export function AudioEngine() {
 
   useEffect(() => {
     refreshUrl.current = false
-    resumeAt.current = 0
+    resumeAt.current = usePlayer.getState().position
   }, [track, provider, playbackId])
 
   /** Snapshot for the watchdog: one key per playback, position of the active deck. */
@@ -164,7 +185,8 @@ export function AudioEngine() {
     toast(stuck ? `«${stuck.title}» no carga.` : "No se pudo cargar la canción.", { duration: 2500 })
   }
 
-  // Watchdog: if the active deck makes no progress for ~12 s while it should be playing, retry and then skip.
+  // Watchdog: if the active deck does not really play for ~12 s while it should (stalled, or a throttled
+  // stream trickling crumbs of audio), retry with a fresh URL where it stopped, and then skip.
   useEffect(() => {
     const timer = window.setInterval(() => {
       if (!ref.current || !usePlayer.getState().queue.length) return
@@ -213,13 +235,16 @@ export function AudioEngine() {
         a.src = url
         const at = resumeAt.current
         resumeAt.current = 0
-        if (at > 1) {
+        if (at > 0) {
           // Retry after a stall: continue where it stopped once the new source knows its length.
           a.addEventListener("loadedmetadata", () => { if (!cancelled && ref.current === a) a.currentTime = Math.min(at, isFinite(a.duration) ? Math.max(0, a.duration - 1) : at) }, { once: true })
           usePlayer.setState({ position: at })
         }
         if (usePlayer.getState().isPlaying) a.play().catch((error: DOMException) => {
-          if (!cancelled && !["AbortError", "NotSupportedError"].includes(error.name)) usePlayer.getState().setPlaying(false)
+          if (!cancelled && !["AbortError", "NotSupportedError"].includes(error.name)) {
+            usePlayer.getState().setPlaying(false)
+            if (error.name === "NotAllowedError") toast("Pulsa Reproducir en este dispositivo para permitir el audio.")
+          }
         })
         provider.scrobble?.(track.id, false).catch(() => {})
       })
@@ -258,7 +283,7 @@ export function AudioEngine() {
 
   // Preload the song that auto-advance will pick on the idle deck, shortly before the end.
   useEffect(() => {
-    if (!dualDeck || !armNow || !track || !ready.current || buffering) return
+    if (!dualDeck || !armNow || !track || !ready.current || !settled) return
     const upcoming = nextAutoTrack(queue, index, repeat)
     if (!upcoming) return
     if (armed.current?.trackId === upcoming.track.id && armed.current.playbackId === playbackId) return
@@ -275,7 +300,7 @@ export function AudioEngine() {
       armed.current = { trackId: upcoming.track.id, playbackId, deck: idle }
     }).catch(() => {})
     return () => controller.abort()
-  }, [dualDeck, armNow, track, queue, index, repeat, playbackId, buffering, provider])
+  }, [dualDeck, armNow, track, queue, index, repeat, playbackId, settled, provider])
 
   // Turning gapless/crossfade off drops whatever is armed.
   useEffect(() => {
@@ -302,14 +327,14 @@ export function AudioEngine() {
   // Cache a small window in queue order, once current audio is ready, including
   // while paused. Revisit it on queue edits, resume and near the end of long songs.
   useEffect(() => {
-    if (buffering || !ready.current || !upcoming.length || !provider.prepareTrack) return
+    if (!settled || !ready.current || !upcoming.length || !provider.prepareTrack) return
     const controller = new AbortController()
     void prepareQueuedTracks(upcoming, provider.prepareTrack.bind(provider), controller.signal)
     return () => controller.abort()
-  }, [upcoming, isPlaying, buffering, nearEnd, provider])
+  }, [upcoming, isPlaying, settled, nearEnd, provider])
 
   useEffect(() => {
-    if (!track || !isPlaying || buffering || !ready.current || ref.current?.paused || !isQueueEnd || repeat !== "off" || !provider.getRecommendations) return
+    if (!track || !isPlaying || !settled || !ready.current || ref.current?.paused || !isQueueEnd || repeat !== "off" || !provider.getRecommendations) return
     const controller = new AbortController()
     void provider.getRecommendations(track, controller.signal).then((tracks) => {
       if (controller.signal.aborted) return
@@ -317,7 +342,7 @@ export function AudioEngine() {
       if (provider.prepareTrack) return prepareQueuedTracks(tracks.filter((item) => !seen.has(item.id)), provider.prepareTrack.bind(provider), controller.signal)
     }).catch(() => {})
     return () => controller.abort()
-  }, [track, queue, isPlaying, buffering, isQueueEnd, repeat, nearEnd, provider])
+  }, [track, queue, isPlaying, settled, isQueueEnd, repeat, nearEnd, provider])
 
   // Media Session metadata
   useEffect(() => {
@@ -383,6 +408,7 @@ export function AudioEngine() {
       onPlaying={(e) => live(e.currentTarget) && usePlayer.setState({ buffering: false, isPlaying: true })}
       onCanPlay={(e) => live(e.currentTarget) && usePlayer.setState({ buffering: false })}
       onPause={(e) => {
+        if (!useDevices.getState().localPlayback) return
         if (!(live(e.currentTarget) && ready.current && e.currentTarget.paused && !e.currentTarget.ended)) return
         // The store still says "playing": the WebView paused the element itself (audio focus lost to a call, another app, the assistant…)
         if (usePlayer.getState().isPlaying) notePause("focus", "el sistema pausó el audio (otra app, llamada o asistente)")

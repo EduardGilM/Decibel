@@ -4,6 +4,7 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.ClipData
 import android.content.Context
@@ -18,6 +19,7 @@ import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
@@ -34,6 +36,7 @@ import java.security.MessageDigest
 import org.json.JSONObject
 import java.io.File
 import java.lang.ref.WeakReference
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Native side of background playback. The audio itself still plays in the WebView (two-deck crossfade,
@@ -72,9 +75,14 @@ object DecibelMedia {
   /** In-app update download: idle, downloading:<pct>, verifying, installing or error:<message>. */
   @Volatile private var updateState = "idle"
   @Volatile private var pendingApk: File? = null
+  @Volatile var autoReady = false; private set
+  private var autoSequence = 0
+  private var autoPlaybackGeneration = 0
+  private val autoRequests = ConcurrentHashMap<Int, (JSONObject?) -> Unit>()
+  private var autoError: String? = null
 
   /** True while the WebView must keep running in the background. */
-  val keepAlive get() = active
+  val keepAlive get() = active || AutoBrowserService.connected
 
   // ---- lifecycle -------------------------------------------------------------------------------------
   fun attach(activity: Activity) {
@@ -84,15 +92,33 @@ object DecibelMedia {
 
   @SuppressLint("SetJavaScriptEnabled", "JavascriptInterface")
   fun attachWebView(view: WebView) {
+    setAutoReady(false)
     webView = WeakReference(view)
     view.addJavascriptInterface(Bridge, "DecibelNative")
+  }
+
+  /** The car may bind before the Activity exists. Keep one token for the entire process lifetime. */
+  fun initialize(context: Context): MediaSession {
+    if (!::app.isInitialized) app = context.applicationContext
+    ensureSession()
+    webView.get()?.onResume()
+    publish()
+    return session!!
   }
 
   fun release() {
     active = false
     setPlaying(false)
-    session?.release(); session = null
+    trackId = ""; title = ""; artist = ""; album = ""; art = null
+    positionMs = 0; durationMs = 0
+    publish()
     MediaPlaybackService.stop(app)
+  }
+
+  fun detach() {
+    setAutoReady(false)
+    webView.clear()
+    release()
   }
 
   // ---- JS → native -----------------------------------------------------------------------------------
@@ -112,7 +138,17 @@ object DecibelMedia {
       }.start()
     }
     @JavascriptInterface fun stop() { main.post { release() } }
-    @JavascriptInterface fun version(): Int = 6
+    @JavascriptInterface fun version(): Int = 7
+    @JavascriptInterface fun autoReady(ready: Boolean) { main.post { setAutoReady(ready) } }
+    @JavascriptInterface fun autoRequestActive(id: Int): Boolean = autoReady && autoRequests.containsKey(id)
+    @JavascriptInterface fun autoResult(id: Int, json: String) {
+      main.post {
+        val result = try { JSONObject(json) } catch (_: Exception) { null }
+        autoPlayRequests.remove(id)
+        autoRequests.remove(id)?.invoke(result)
+      }
+    }
+    @JavascriptInterface fun autoRefresh() { main.post { AutoBrowserService.catalogChanged() } }
     /** Whether the playback notification can be shown (permission granted and notifications on for the app). */
     @JavascriptInterface fun notificationsEnabled(): Boolean = notificationsAllowed()
     /** System dialog when Android still allows it, otherwise the app's notification settings. */
@@ -263,6 +299,7 @@ object DecibelMedia {
     rate = data.optDouble("rate", 1.0).toFloat().takeIf { it in 0.25f..4f } ?: 1f
     active = id.isNotEmpty()
     if (!active) { release(); return }
+    autoError = null
     ensureSession()
     setPlaying(data.optBoolean("playing"))
     publish()
@@ -285,8 +322,71 @@ object DecibelMedia {
 
   // ---- native → JS -----------------------------------------------------------------------------------
   fun command(name: String, arg: Double? = null) {
+    if (name == "pause" || name == "next" || name == "prev") cancelAutoPlayback()
     val js = "window.__decibelNative&&window.__decibelNative('$name',${arg ?: "null"})"
     main.post { webView.get()?.evaluateJavascript(js, null) }
+  }
+
+  // ---- Android Auto: asynchronous requests to the authenticated WebView -------------------------------
+  private fun cancelAutoPlayback() {
+    autoPlaybackGeneration++
+    // Remove the request before notifying JS; its guard must reject late provider responses.
+    for (id in autoPlayRequests.toList()) {
+      autoPlayRequests.remove(id)
+      autoRequests.remove(id)?.invoke(null)
+    }
+  }
+
+  private val autoPlayRequests = mutableSetOf<Int>()
+
+  private fun setAutoReady(ready: Boolean) {
+    autoReady = ready && webView.get() != null
+    if (!autoReady) {
+      cancelAutoPlayback()
+      val pending = autoRequests.values.toList()
+      autoRequests.clear()
+      pending.forEach { it(null) }
+    }
+    autoError = null
+    if (::app.isInitialized) { ensureSession(); publish() }
+    AutoBrowserService.catalogChanged()
+  }
+
+  fun requestAuto(action: String, value: String, callback: (JSONObject?) -> Unit) {
+    if (!autoReady || webView.get() == null) {
+      autoFailure("Abre Decibel en el teléfono antes de conducir")
+      callback(null)
+      return
+    }
+    val id = ++autoSequence
+    autoRequests[id] = callback
+    if (action != "browse") autoPlayRequests.add(id)
+    val request = JSONObject().put("id", id).put("action", action).put("value", value)
+    webView.get()?.evaluateJavascript("window.__decibelAuto&&window.__decibelAuto($request)", null)
+    main.postDelayed({
+      autoPlayRequests.remove(id)
+      autoRequests.remove(id)?.invoke(null)
+    }, 12_000)
+  }
+
+  private fun playAuto(action: String, value: String) {
+    cancelAutoPlayback()
+    val generation = autoPlaybackGeneration
+    requestAuto(action, value) { response ->
+      if (generation == autoPlaybackGeneration) {
+        if (response == null) autoFailure(if (autoReady) "No se pudo cargar la música. Inténtalo de nuevo" else "Abre Decibel en el teléfono antes de conducir")
+        else if (response.has("error")) autoFailure("No se pudo reproducir la selección. Inténtalo de nuevo")
+      }
+    }
+  }
+
+  fun autoFailure(message: String) {
+    autoError = message
+    publish()
+  }
+
+  fun autoRecovered() {
+    if (autoError != null) { autoError = null; publish() }
   }
 
   // ---- MediaSession ----------------------------------------------------------------------------------
@@ -294,10 +394,15 @@ object DecibelMedia {
     if (session != null) return
     session = MediaSession(app, "Decibel").apply {
       setCallback(object : MediaSession.Callback() {
-        override fun onPlay() { command("play") }
+        override fun onPlay() {
+          if (!autoReady && !active) autoFailure("Abre Decibel en el teléfono antes de conducir")
+          else if (active) { cancelAutoPlayback(); command("play") }
+          else playAuto("search", "")
+        }
+        override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) { if (mediaId != null) playAuto("play", mediaId) }
+        override fun onPlayFromSearch(query: String?, extras: Bundle?) { playAuto("search", query ?: "") }
         override fun onPause() {
-          // A system pause right after play is not something the user did: never pause when the cause is unclear.
-          if (playing && SystemClock.elapsedRealtime() - playingSince < 1500) { notePause("system", "MediaSession onPause justo tras play", ignored = true); return }
+          cancelAutoPlayback()
           pauseBy("system", "MediaSession (auriculares, Bluetooth, pantalla de bloqueo)")
         }
         override fun onSkipToNext() { command(if (podcast) "forward" else "next") }
@@ -306,12 +411,14 @@ object DecibelMedia {
         override fun onRewind() { command("back") }
         override fun onSeekTo(pos: Long) { positionMs = pos; publish(); command("seek", pos / 1000.0) }
         override fun onStop() {
-          if (playing && SystemClock.elapsedRealtime() - playingSince < 1500) { notePause("system", "MediaSession onStop justo tras play", ignored = true); return }
+          cancelAutoPlayback()
           pauseBy("system", "MediaSession onStop")
         }
       })
       @Suppress("DEPRECATION")
       setFlags(MediaSession.FLAG_HANDLES_MEDIA_BUTTONS or MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS)
+      setSessionActivity(PendingIntent.getActivity(app, 0, Intent(app, MainActivity::class.java),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
       isActive = true
     }
   }
@@ -319,19 +426,30 @@ object DecibelMedia {
   private fun publish() {
     val s = session ?: return
     val meta = MediaMetadata.Builder()
+      .putString(MediaMetadata.METADATA_KEY_MEDIA_ID, trackId)
       .putString(MediaMetadata.METADATA_KEY_TITLE, title)
       .putString(MediaMetadata.METADATA_KEY_ARTIST, artist)
       .putString(MediaMetadata.METADATA_KEY_ALBUM, album)
       .putLong(MediaMetadata.METADATA_KEY_DURATION, durationMs) // > 0 gives the progress bar (Android 13+)
     art?.let { meta.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, it).putBitmap(MediaMetadata.METADATA_KEY_ART, it) }
     s.setMetadata(meta.build())
-    s.setPlaybackState(PlaybackState.Builder()
+    val error = autoError ?: if (!autoReady && !active) "Abre Decibel en el teléfono antes de conducir" else null
+    val state = PlaybackState.Builder()
       .setActions(PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE or
+        PlaybackState.ACTION_PLAY_FROM_MEDIA_ID or PlaybackState.ACTION_PLAY_FROM_SEARCH or
         PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS or PlaybackState.ACTION_SEEK_TO or PlaybackState.ACTION_STOP or
         (if (podcast) PlaybackState.ACTION_FAST_FORWARD or PlaybackState.ACTION_REWIND else 0L))
-      .setState(if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED, positionMs, if (playing) rate else 0f, SystemClock.elapsedRealtime())
-      .build())
-    MediaPlaybackService.refresh(app)
+      .setState(if (playing) PlaybackState.STATE_PLAYING else if (error != null) PlaybackState.STATE_ERROR else if (active) PlaybackState.STATE_PAUSED else PlaybackState.STATE_NONE,
+        positionMs, if (playing) rate else 0f, SystemClock.elapsedRealtime())
+    if (error != null) {
+      state.setErrorMessage(error)
+      if (!autoReady) state.setExtras(Bundle().apply {
+        putString("android.media.extras.ERROR_RESOLUTION_ACTION_LABEL", "Abrir Decibel")
+        putParcelable("android.media.extras.ERROR_RESOLUTION_ACTION_INTENT", s.controller.sessionActivity)
+      })
+    }
+    s.setPlaybackState(state.build())
+    if (active) MediaPlaybackService.refresh(app)
   }
 
   // ---- playing / paused ------------------------------------------------------------------------------

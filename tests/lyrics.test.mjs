@@ -5,6 +5,14 @@ import { activeLyricsLine, findLyrics, findLyricsWithRetry, lyricsLookup, parseL
 const track = { id: "yt:-byTiKtOrH4", title: "Extremoduro - Dulce introducción al caos (Audio Oficial)", artist: "Extremoduro (Oficial)", album: "YouTube", duration: 463 }
 const record = { id: 1, trackName: "Dulce Introducción al Caos", artistName: "Extremoduro", duration: 462, instrumental: false, plainLyrics: "Primera línea de prueba\nSegunda línea de prueba", syncedLyrics: "[00:02.00]Primera línea de prueba\n[00:05.25]Segunda línea de prueba" }
 
+function mockLyricsStorage(t, entries) {
+  const original = globalThis.localStorage
+  const values = new Map([["decibel-lyrics", JSON.stringify(entries)]])
+  globalThis.localStorage = { getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) }
+  t.after(() => { if (original === undefined) delete globalThis.localStorage; else globalThis.localStorage = original })
+  return values
+}
+
 test("YouTube lookup uses the artist and song instead of display annotations or channel names", () => {
   assert.deepEqual(lyricsLookup(track), { title: "Dulce introducción al caos", artist: "Extremoduro", duration: 463 })
   assert.deepEqual(lyricsLookup({ ...track, title: "Extremoduro — Dulce introducción al caos [Letra]", artist: "Band Lyrics" }), { title: "Dulce introducción al caos", artist: "Extremoduro", duration: 463 })
@@ -32,6 +40,16 @@ test("matching recording gets synced lyrics; another duration only gets the word
   assert.deepEqual(selectLyrics([record], { ...lyricsLookup(track), duration: 0 }).lines, [])
 })
 
+test("usable synced lyrics take priority over closer plain text within the same recording tolerance", () => {
+  const lookup = lyricsLookup(track)
+  const plain = { ...record, id: 2, duration: track.duration, syncedLyrics: null }
+  assert.equal(selectLyrics([plain, record], lookup).id, record.id)
+  assert.equal(selectLyrics([plain, { ...record, duration: track.duration - 2 }], lookup).id, record.id)
+  assert.equal(selectLyrics([plain, { ...record, duration: track.duration - 2.1 }], lookup).id, plain.id)
+  assert.equal(selectLyrics([{ ...plain, syncedLyrics: "No hay tiempos" }, record], lookup).id, record.id)
+  assert.deepEqual(selectLyrics([{ ...record, syncedLyrics: "[00:02.00]" }], lookup).lines, [])
+})
+
 test("different artists and versions are not silently substituted", () => {
   assert.equal(selectLyrics([{ ...record, artistName: "Otro artista" }], lyricsLookup(track)), null)
   assert.equal(selectLyrics([{ ...record, trackName: "Dulce introducción al caos (En directo)" }], lyricsLookup(track)), null)
@@ -55,6 +73,131 @@ test("when exact lookup misses, search finds the right recording and reuses its 
   assert.equal(calls[1].searchParams.has("duration"), false)
   assert.deepEqual(await findLyrics(song), result)
   assert.equal(calls.length, 2)
+})
+
+test("an exact plain result still searches for compatible synced lyrics", async (t) => {
+  const song = { ...track, id: "plain-exact", title: "Letra con alternativa", artist: "Artista de prueba" }
+  const exact = { ...record, trackName: song.title, artistName: song.artist, duration: song.duration, syncedLyrics: null }
+  const calls = []
+  t.mock.method(globalThis, "fetch", async (url) => {
+    calls.push(new URL(url))
+    return Response.json(calls.length === 1 ? exact : [{ ...exact, id: 2, duration: song.duration - 1, syncedLyrics: record.syncedLyrics }])
+  })
+  const result = await findLyrics(song)
+  assert.equal(result.id, 2)
+  assert.equal(result.lines.length, 2)
+  assert.deepEqual(calls.map((url) => url.pathname), ["/api/get", "/api/search"])
+  assert.equal(calls[1].searchParams.has("duration"), false)
+  assert.deepEqual(await findLyrics(song), result)
+  assert.equal(calls.length, 2)
+})
+
+test("search keeps the exact plain lyrics when other results belong to a different recording", async (t) => {
+  const song = { ...track, id: "plain-kept", title: "Letra sin alternativa", artist: "Artista de prueba" }
+  const exact = { ...record, trackName: song.title, artistName: song.artist, syncedLyrics: null }
+  let calls = 0
+  t.mock.method(globalThis, "fetch", async () => {
+    calls++
+    return Response.json(calls === 1 ? exact : [{ ...exact, id: 2, duration: 490, syncedLyrics: record.syncedLyrics }])
+  })
+  const result = await findLyrics(song)
+  assert.equal(result.id, exact.id)
+  assert.equal(result.text, exact.plainLyrics)
+  assert.deepEqual(result.lines, [])
+  assert.equal(calls, 2)
+})
+
+test("a failed sync search keeps available text and can recover after a short cache interval", async (t) => {
+  const song = { ...track, id: "plain-recovery", title: "Letra con búsqueda interrumpida", artist: "Artista de prueba" }
+  const exact = { ...record, trackName: song.title, artistName: song.artist, syncedLyrics: null }
+  let now = Date.now(), calls = 0
+  t.mock.method(Date, "now", () => now)
+  t.mock.method(globalThis, "fetch", async (url) => {
+    calls++
+    if (new URL(url).pathname === "/api/get") return Response.json(exact)
+    return calls === 2 ? Response.json({}, { status: 503 }) : Response.json([{ ...exact, syncedLyrics: record.syncedLyrics }])
+  })
+  assert.equal((await findLyrics(song)).text, exact.plainLyrics)
+  assert.deepEqual((await findLyrics(song)).lines, [])
+  assert.equal(calls, 2)
+  now += 60_001
+  assert.equal((await findLyrics(song)).lines.length, 2)
+  assert.equal(calls, 4)
+})
+
+test("cancelling a sync search does not cache its incomplete plain result", async (t) => {
+  const song = { ...track, id: "plain-abort", title: "Letra con búsqueda cancelada", artist: "Artista de prueba" }
+  const exact = { ...record, trackName: song.title, artistName: song.artist, syncedLyrics: null }
+  const controller = new AbortController()
+  t.mock.method(globalThis, "fetch", async (url) => {
+    if (new URL(url).pathname === "/api/get") return Response.json(exact)
+    controller.abort()
+    throw controller.signal.reason
+  })
+  await assert.rejects(findLyrics(song, controller.signal), { name: "AbortError" })
+  t.mock.method(globalThis, "fetch", async () => Response.json({ ...exact, syncedLyrics: record.syncedLyrics }))
+  assert.equal((await findLyrics(song)).lines.length, 2)
+})
+
+test("legacy persistent plain lyrics are rechecked and upgraded instead of being reused forever", async (t) => {
+  const song = { ...track, id: "legacy-plain", title: "Letra guardada antigua", artist: "Artista de prueba" }
+  const key = JSON.stringify(lyricsLookup(song))
+  const plain = { id: record.id, instrumental: false, text: record.plainLyrics, lines: [] }
+  const values = mockLyricsStorage(t, { [key]: plain })
+  let calls = 0
+  t.mock.method(globalThis, "fetch", async () => {
+    calls++
+    return Response.json({ ...record, trackName: song.title, artistName: song.artist })
+  })
+  const result = await findLyrics(song)
+  assert.equal(result.lines.length, 2)
+  assert.equal(calls, 1)
+  const saved = JSON.parse(values.get("decibel-lyrics"))[key]
+  assert.deepEqual(saved, { ...result, expires: saved.expires })
+  assert.ok(saved.expires > Date.now())
+})
+
+test("fresh persistent plain lyrics are reused until expiry, then searched again", async (t) => {
+  const song = { ...track, id: "expiring-plain", title: "Letra guardada con caducidad", artist: "Artista de prueba" }
+  const key = JSON.stringify(lyricsLookup(song))
+  const plain = { id: record.id, instrumental: false, text: record.plainLyrics, lines: [] }
+  let now = Date.now(), calls = 0
+  t.mock.method(Date, "now", () => now)
+  mockLyricsStorage(t, { [key]: { ...plain, expires: now + 10 * 60_000 } })
+  t.mock.method(globalThis, "fetch", async () => {
+    calls++
+    return Response.json({ ...record, trackName: song.title, artistName: song.artist })
+  })
+  assert.deepEqual(await findLyrics(song), plain)
+  assert.equal(calls, 0)
+  now += 10 * 60_000 + 1
+  assert.equal((await findLyrics(song)).lines.length, 2)
+  assert.equal(calls, 1)
+})
+
+test("expired saved lyrics remain available when offline", async (t) => {
+  const song = { ...track, id: "expired-offline", title: "Letra guardada sin conexión", artist: "Artista de prueba" }
+  const key = JSON.stringify(lyricsLookup(song))
+  const saved = { id: record.id, instrumental: false, text: record.plainLyrics, lines: parseLrc(record.syncedLyrics) }
+  mockLyricsStorage(t, { [key]: { ...saved, expires: Date.now() - 1 } })
+  let calls = 0
+  t.mock.method(globalThis, "fetch", async () => { calls++; throw new TypeError("Failed to fetch") })
+  assert.deepEqual(await findLyricsWithRetry(song, undefined, [0, 1]), saved)
+  assert.equal(calls, 1)
+})
+
+test("refreshing saved synced lyrics never downgrades them to plain text", async (t) => {
+  const song = { ...track, id: "synced-kept", title: "Letra sincronizada guardada", artist: "Artista de prueba" }
+  const key = JSON.stringify(lyricsLookup(song))
+  const saved = { id: record.id, instrumental: false, text: record.plainLyrics, lines: parseLrc(record.syncedLyrics) }
+  mockLyricsStorage(t, { [key]: { ...saved, expires: Date.now() - 1 } })
+  let calls = 0
+  t.mock.method(globalThis, "fetch", async (url) => {
+    calls++
+    return Response.json(new URL(url).pathname === "/api/get" ? { ...record, trackName: song.title, artistName: song.artist, syncedLyrics: null } : [])
+  })
+  assert.deepEqual(await findLyrics(song), saved)
+  assert.equal(calls, 2)
 })
 
 test("missing lyrics return an empty state; connection failures remain retryable", async (t) => {

@@ -78,7 +78,7 @@ export function mapCatalogTrack(info) {
 }
 
 export function createYtMusicRunner(python, script) {
-  return (operation, value = "") => new Promise((resolve, reject) => {
+  return (operation, value = "", { signal } = {}) => new Promise((resolve, reject) => {
     if (!["health", "home", "search", "searchAlbums", "searchArtists", "song", "album", "artist", "artistRadio", "artistSongs", "recommendations"].includes(operation)) {
       reject(new MusicError("Operación de catálogo no válida.")); return
     }
@@ -86,9 +86,10 @@ export function createYtMusicRunner(python, script) {
       reject(new MusicError("El identificador de playlist del catálogo no es válido.")); return
     }
     execFile(python, ["-B", script, operation, value], {
-      timeout: operation === "home" ? 6000 : 45_000, maxBuffer: 4 * 1024 * 1024, windowsHide: true,
+      timeout: operation === "home" ? 6000 : 45_000, maxBuffer: 4 * 1024 * 1024, windowsHide: true, signal,
     }, (error, stdout, stderr) => {
-      if (error) {
+      if (error?.name === "AbortError") reject(new MusicError("Consulta cancelada.", 499))
+      else if (error) {
         const setup = error.code === "ENOENT" || stderr.includes('"setup"') || stderr.includes("No module named")
         reject(new MusicError(setup ? "Falta YouTube Music en el servidor. Ejecuta npm run music:setup." : error.killed ? "YouTube Music ha tardado demasiado. Vuelve a intentarlo." : "No se pudo consultar YouTube Music. Vuelve a intentarlo.", 502))
       } else {

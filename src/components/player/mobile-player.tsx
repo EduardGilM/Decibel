@@ -13,6 +13,7 @@ import { usePlayer, type PlayerTab } from "@/stores/player"
 import { SeekBar, TransportControls } from "./controls"
 import { QueueList } from "./queue-list"
 import { MiniSeek } from "./mini-seek"
+import { DevicePicker } from "./device-picker"
 import { chipClass } from "@/components/music/filter-chips"
 import { LyricsPanel } from "./lyrics-panel"
 import { useNowPlayingTint } from "@/lib/use-tint"
@@ -193,6 +194,7 @@ export function MobilePlayer() {
                   <SeekBar compact />
                   {/* No volume slider on phones: the hardware buttons own volume. */}
                   <TransportControls size="lg" className="pb-2" />
+                  <div className="-mt-4 flex justify-center"><DevicePicker variant="label" /></div>
                 </div>
                 <div className="flex flex-col gap-3 px-4 pb-6">
                   {!podcast && <LyricsCard track={track} />}

@@ -163,6 +163,20 @@ test("own password change requires the current one", async (t) => {
   assert.equal((await call("/api/auth/me", { token })).status, 200) // this device stays logged in
 })
 
+test("the library revision changes for its owner when likes or lists change elsewhere", async (t) => {
+  const { call, login } = await setup(t)
+  const a = (await login("Blanca")).token, b = (await login("Carlos")).token
+  const revision = async (token) => (await call("/api/me/revision?source=ytdlp", { token })).body.revision
+  const first = await revision(a), other = await revision(b)
+  await call("/api/me/likes", { token: a, method: "PUT", body: { source: "ytdlp", kind: "track", item: track("r1") } })
+  const liked = await revision(a)
+  assert.notEqual(liked, first)
+  await call("/api/playlists", { token: a, method: "POST", body: { source: "ytdlp", name: "Nueva", track: track("r2") } })
+  assert.notEqual(await revision(a), liked)
+  assert.equal(await revision(b), other)
+  assert.equal((await call("/api/me/revision?source=ytdlp")).status, 401)
+})
+
 test("likes, history and settings are isolated per profile", async (t) => {
   const { call, login } = await setup(t)
   const a = (await login("Blanca")).token, b = (await login("Dana")).token
@@ -196,6 +210,27 @@ test("import of device data is idempotent", async (t) => {
   assert.equal(lists.length, 1)
   assert.equal(lists[0].songCount, 2)
   assert.equal((await call("/api/me/history?source=mock", { token })).body.length, 1)
+})
+
+test("Spotify imports belong only to the authenticated profile and reject a stale preview", async (t) => {
+  const { call, login, profiles } = await setup(t, { seed: false })
+  const alice = await profiles.accounts.createUser({ username: "Import A", password: "test-password-a" })
+  const bob = await profiles.accounts.createUser({ username: "Import B", password: "test-password-b" })
+  const a = (await login("Import A", "test-password-a")).token
+  const b = (await login("Import B", "test-password-b")).token
+  const data = { profileId: alice.id, source: "ytdlp", likes: [{ kind: "track", item: track("matched") }], playlists: [{ name: "Spotify", tracks: [track("matched")] }] }
+  assert.equal((await call("/api/me/import", { method: "POST", body: data })).status, 401)
+  assert.equal((await call("/api/me/import", { token: b, method: "POST", body: data })).status, 409)
+  const imported = await call("/api/me/import", { token: a, method: "POST", body: data })
+  assert.equal(imported.status, 200)
+  assert.equal(imported.body.playlists, 1)
+  assert.equal((await call("/api/me/likes?source=ytdlp", { token: a })).body.tracks.length, 1)
+  assert.equal((await call("/api/me/likes?source=ytdlp", { token: b })).body.tracks.length, 0)
+  assert.equal((await call("/api/playlists?source=ytdlp", { token: b })).body.length, 0)
+  const own = (await call("/api/playlists?source=ytdlp", { token: a })).body
+  assert.equal((await call(`/api/playlists/${own[0].id}`, { token: b })).status, 404)
+  assert.equal((await call("/api/me/import", { token: a, method: "POST", body: data })).body.playlists, 0)
+  assert.equal((await call("/api/me/import", { token: b, method: "POST", body: { ...data, profileId: bob.id } })).body.playlists, 1)
 })
 
 test("shared playlists: owner, editor, viewer, collaborative, added-by", async (t) => {

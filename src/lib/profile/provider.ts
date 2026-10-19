@@ -46,7 +46,11 @@ function cached<T>(name: string, load: () => Promise<T>): Promise<T> {
 // Liked ids for the current profile and the item snapshots we have seen (star() only gets an id).
 let likes: { source: DataSource; ids: Set<string>; load: Promise<Starred> } | null = null
 const seen = new Map<string, Track | Album | Artist>()
-if (typeof window !== "undefined") window.addEventListener("decibel:profile-changed", () => { likes = null; seen.clear() })
+if (typeof window !== "undefined") {
+  window.addEventListener("decibel:profile-changed", () => { likes = null; seen.clear() })
+  // Liked elsewhere: the hearts reload with the next answer.
+  window.addEventListener("decibel:library-sync", () => { likes = null })
+}
 
 function loadLikes(source: DataSource, fresh = false) {
   if (!likes || likes.source !== source || fresh) {

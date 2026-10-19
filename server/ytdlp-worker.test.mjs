@@ -8,11 +8,14 @@ const root = resolve(import.meta.dirname, "..")
 const python = resolve(root, ".tools/ytmusic/bin/python")
 const worker = resolve(root, "server/ytdlp-worker.py")
 
-const withYtDlp = await access(python, constants.X_OK).then(async () => new Promise((resolveResult) => {
+// It really extracts from YouTube: only on explicit request, never in the normal suite or a release.
+// (`npm test -- --test-skip-pattern=…` does not skip it: Node ignores that option after the file list.)
+const requested = process.env.DECIBEL_REAL_YTDLP === "1"
+const withYtDlp = requested && await access(python, constants.X_OK).then(async () => new Promise((resolveResult) => {
   execFile(python, ["-c", "import yt_dlp, yt_dlp_ejs"], (error) => resolveResult(!error))
 })).catch(() => false)
 
-test("el trabajador real resuelve la URL con el reto JS de YouTube resuelto", { skip: !withYtDlp && "requiere .tools/ytmusic con yt-dlp[default] (npm run music:setup)" }, async (t) => {
+test("el trabajador real resuelve la URL con el reto JS de YouTube resuelto", { skip: requested ? !withYtDlp && "requiere .tools/ytmusic con yt-dlp[default] (npm run music:setup)" : "solo con DECIBEL_REAL_YTDLP=1 (extrae de verdad de YouTube)" }, async (t) => {
   const proc = spawn(python, [worker, resolve(root, ".tools/yt-dlp-cache"), process.execPath], { stdio: ["pipe", "pipe", "pipe"] })
   t.after(() => proc.kill("SIGKILL"))
   proc.stderr.on("data", () => {})

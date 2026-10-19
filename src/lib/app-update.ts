@@ -54,6 +54,7 @@ export function androidProgress(raw: string | undefined | null): UpdateProgress 
 export interface DesktopUpdateLike {
   version: string
   downloadAndInstall: (onEvent?: (event: { event: string; data?: { contentLength?: number; chunkLength?: number } }) => void) => Promise<void>
+  close?: () => Promise<void>
 }
 
 /**

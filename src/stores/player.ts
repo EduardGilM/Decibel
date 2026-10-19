@@ -4,6 +4,7 @@ import { create } from "zustand"
 import { createJSONStorage, persist } from "zustand/middleware"
 import type { Track } from "@/lib/types"
 import { RECOMMENDATIONS_TIMEOUT_MS } from "../lib/audio/watchdog.ts"
+import { playbackActions, routePlayback } from "../lib/audio/device-protocol.ts"
 
 /** Pre-rename key ("decibel-x" -> "musica-x"); read once as fallback, removed on the next write. */
 const legacyKey = (key: string) => key.replace(/^decibel-/, "musica-")
@@ -98,7 +99,7 @@ export const usePlayer = create<PlayerState>()(
         recommendationRequest = null
         set({ loadingRecommendations: false, buffering: false })
       }
-      return {
+      const state: PlayerState = {
         queue: [],
         original: [],
         index: 0,
@@ -267,6 +268,14 @@ export const usePlayer = create<PlayerState>()(
         setFullOpen: (v) => set({ fullOpen: v }),
         setFullTab: (v) => set({ fullTab: v }),
       }
+      for (const action of playbackActions) {
+        const local = state[action] as (...args: unknown[]) => unknown
+        Object.assign(state, { [action]: (...args: unknown[]) => {
+          if (routePlayback({ action, args })) return action === "next" ? Promise.resolve() : undefined
+          return local(...args)
+        } })
+      }
+      return state
     },
     {
       name: "decibel-player",

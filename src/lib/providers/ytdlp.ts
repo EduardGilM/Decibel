@@ -17,6 +17,16 @@ export function normalizeMusicUrl(value: string) {
   return url.toString().replace(/\/+$/, "")
 }
 
+/** Backoff between reads of a busy server (about 7 s in total), then the error is shown. */
+export const RETRY_DELAYS = [500, 1200, 2000, 3000]
+const wait = (ms: number, signal?: AbortSignal | null) => new Promise<void>((resolve, reject) => {
+  if (signal?.aborted) { reject(signal.reason); return }
+  const done = () => { clearTimeout(timer); signal?.removeEventListener("abort", stop); resolve() }
+  const stop = () => { clearTimeout(timer); reject(signal?.reason) }
+  const timer = setTimeout(done, ms)
+  signal?.addEventListener("abort", stop, { once: true })
+})
+
 export class YtDlpProvider implements MusicProvider {
   readonly kind = "ytdlp" as const
   private baseUrl: string
@@ -30,7 +40,24 @@ export class YtDlpProvider implements MusicProvider {
     }
   }
 
+  /**
+   * Reads retry a busy server (429: every YouTube Music slot taken, e.g. right after a burst of suggestions) a few
+   * times with backoff before showing the error; writes are never repeated.
+   */
   private async request<T>(route: string, init: RequestInit = {}): Promise<T> {
+    const read = !init.method || init.method === "GET"
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.requestOnce<T>(route, init)
+      } catch (error) {
+        const status = (error as { status?: number }).status
+        if (!read || status !== 429 || attempt >= RETRY_DELAYS.length || init.signal?.aborted) throw error
+        await wait(RETRY_DELAYS[attempt], init.signal)
+      }
+    }
+  }
+
+  private async requestOnce<T>(route: string, init: RequestInit = {}): Promise<T> {
     try {
       const signal = AbortSignal.any([AbortSignal.timeout(70_000), ...(init.signal ? [init.signal] : [])])
       const response = await fetch(`${this.baseUrl}/api/music/${route}`, {

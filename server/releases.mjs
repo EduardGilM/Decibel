@@ -5,7 +5,7 @@ import { join, sep } from "node:path"
 /**
  * Public downloads and app updates, served from a releases directory outside git (`DECIBEL_RELEASES_DIR`,
  * root-owned and read-only for the service). The release script (scripts/release.mjs) writes there:
- * - the artifacts (APK, Windows installer, AppImage, .deb) and their updater signatures (`*.sig`);
+ * - the artifacts (APK, Windows installer, .deb; AppImage only in old releases) and their updater signatures (`*.sig`);
  * - `releases.json`: current version, versionCode and every file with its sha256 (download page, Android check);
  * - `latest.json`: the Tauri updater manifest for the desktop apps.
  * Routes (no session needed: nothing here is secret): `GET /download`, `GET /releases/<file>`, `GET /api/app/version`.
@@ -61,7 +61,7 @@ export async function readManifest(dir) {
 export function detectPlatform(userAgent = "") {
   if (/Android/i.test(userAgent)) return "android"
   if (/Windows/i.test(userAgent)) return "windows"
-  if (/Linux|X11|CrOS/i.test(userAgent)) return "linux-appimage"
+  if (/Linux|X11|CrOS/i.test(userAgent)) return "linux-deb"
   return null
 }
 

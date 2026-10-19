@@ -65,6 +65,8 @@ class MainActivity : TauriActivity() {
 
   override fun onWebViewCreate(webView: WebView) {
     this.webView = webView
+    // MediaSession commands from Android Auto are user actions outside the WebView.
+    webView.settings.mediaPlaybackRequiresUserGesture = false
     DecibelMedia.attachWebView(webView)
     // Keep the renderer at "important" priority even when the app is not visible, so Android does not
     // starve or kill it while music plays in the background.
@@ -101,7 +103,7 @@ class MainActivity : TauriActivity() {
   }
 
   override fun onDestroy() {
-    if (isFinishing) DecibelMedia.release()
+    if (isFinishing) DecibelMedia.detach()
     super.onDestroy()
   }
 

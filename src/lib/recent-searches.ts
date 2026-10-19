@@ -42,3 +42,22 @@ export function parseRows(value: unknown): RecentRow[] {
 }
 
 export const tracksOf = (rows: RecentRow[]) => rows.filter((row) => row.kind === "track").map((row) => row.item)
+
+/**
+ * Persisted search store from older app versions. 0.1.9 saved `{ recent }` without a version (0) and zustand
+ * drops state whose version differs unless it is migrated, which lost the device's list before it could be
+ * uploaded to the profile. Keeps every well-formed old list; anything else starts empty.
+ */
+export function migrateSearchState(state: unknown, version: number): { recent: Record<string, Track[]>; rows: Record<string, RecentRow[]>; queue: Record<string, RecentOp[]>; seq: number } {
+  const old = (state && typeof state === "object" ? state : {}) as Record<string, unknown>
+  const recent: Record<string, Track[]> = {}
+  if (old.recent && typeof old.recent === "object" && !Array.isArray(old.recent)) {
+    for (const [scope, list] of Object.entries(old.recent as Record<string, unknown>)) {
+      if (!Array.isArray(list)) continue
+      const tracks = list.filter((t): t is Track => !!t && typeof t === "object" && typeof (t as Track).id === "string" && !!(t as Track).id)
+      if (tracks.length) recent[scope] = tracks
+    }
+  }
+  const keep = <T>(value: unknown): Record<string, T> => (version >= 1 && value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, T> : {})
+  return { recent, rows: keep<RecentRow[]>(old.rows), queue: keep<RecentOp[]>(old.queue), seq: version >= 1 && Number.isFinite(old.seq) ? Number(old.seq) : 0 }
+}

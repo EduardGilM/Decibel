@@ -76,6 +76,27 @@ export function useProfileSync() {
     return () => { alive = false; unsubscribe() }
   }, [user, mode])
 
+  // Likes and lists changed on another device (or by an import) appear without reloading.
+  useEffect(() => {
+    if (!user || !mode) return
+    let known: string | undefined
+    const check = () => {
+      if (document.visibilityState !== "visible") return
+      api<{ revision: string }>(`/api/me/revision?source=${mode}`).then(({ revision }) => {
+        if (known !== undefined && revision !== known) {
+          window.dispatchEvent(new Event("decibel:library-sync"))
+          clearDataCache()
+        }
+        known = revision
+      }, () => {})
+    }
+    check()
+    const timer = setInterval(check, 15_000)
+    window.addEventListener("focus", check)
+    document.addEventListener("visibilitychange", check)
+    return () => { clearInterval(timer); window.removeEventListener("focus", check); document.removeEventListener("visibilitychange", check) }
+  }, [user, mode])
+
   useEffect(() => {
     if (!user) return
     let ready = false

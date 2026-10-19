@@ -74,8 +74,8 @@ export function useKeyboardShortcuts() {
         case e.code === "Space": e.preventDefault(); p.toggle(); break
         case key === "ArrowRight" && e.shiftKey: e.preventDefault(); void p.next(); break
         case key === "ArrowLeft" && e.shiftKey: e.preventDefault(); p.prev(); break
-        case key === "ArrowRight": if (a) { e.preventDefault(); p.seek(a.currentTime + 5) } break
-        case key === "ArrowLeft": if (a) { e.preventDefault(); p.seek(a.currentTime - 5) } break
+        case key === "ArrowRight": if (p.queue.length) { e.preventDefault(); p.seek(Math.min(duration || Infinity, (a?.currentTime ?? p.position) + 5)) } break
+        case key === "ArrowLeft": if (p.queue.length) { e.preventDefault(); p.seek(Math.max(0, (a?.currentTime ?? p.position) - 5)) } break
         case key === "ArrowUp": e.preventDefault(); p.setVolume(p.volume + 0.05); break
         case key === "ArrowDown": e.preventDefault(); p.setVolume(p.volume - 0.05); break
         case key === "n": void p.next(); break

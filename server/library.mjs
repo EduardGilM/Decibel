@@ -115,6 +115,14 @@ export function createLibrary(db, { now = () => Date.now() } = {}) {
                          WHERE p.source = ? AND (p.owner_id = ? OR m.user_id IS NOT NULL OR p.collaborative = 1) ORDER BY p.updated_at DESC`)
         .all(userId, source(src), userId).map((p) => lib.summary(userId, p))
     },
+    /** Cheap fingerprint of the likes and visible lists, so other devices notice changes without reloading. */
+    revision(userId, src) {
+      const likes = db.prepare("SELECT COUNT(*) AS n, COALESCE(MAX(created_at), 0) AS at FROM likes WHERE user_id = ? AND source = ?").get(userId, source(src))
+      const lists = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(p.rev), 0) AS rev, COALESCE(MAX(p.updated_at), 0) AS at FROM playlists p
+                                LEFT JOIN playlist_members m ON m.playlist_id = p.id AND m.user_id = ?
+                                WHERE p.source = ? AND (p.owner_id = ? OR m.user_id IS NOT NULL OR p.collaborative = 1)`).get(userId, source(src), userId)
+      return `${likes.n}.${likes.at}.${lists.n}.${lists.rev}.${lists.at}`
+    },
     playlist(userId, id) {
       const { playlist } = lib.access(userId, id)
       const tracks = db.prepare("SELECT t.position, t.track_json, t.added_at, t.added_by, u.username FROM playlist_tracks t LEFT JOIN users u ON u.id = t.added_by WHERE t.playlist_id = ? ORDER BY t.position").all(playlist.id)
@@ -211,7 +219,7 @@ export function createLibrary(db, { now = () => Date.now() } = {}) {
       transaction(db, () => {
         for (const like of likes.slice(0, 5000)) {
           if (!KINDS.includes(like?.kind) || !like.item?.id) continue
-          lib.like(userId, src, like.kind, like.item); counts.likes++
+          lib.like(userId, src, like.kind, like.item, Number.isFinite(like.at) ? Math.min(like.at, now()) : undefined); counts.likes++
         }
         const existing = new Set(db.prepare("SELECT name FROM playlists WHERE owner_id = ? AND source = ?").all(userId, src).map((p) => p.name.toLowerCase()))
         for (const list of playlists.slice(0, 200)) {

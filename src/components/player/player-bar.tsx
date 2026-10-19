@@ -13,6 +13,7 @@ import { usePlayer } from "@/stores/player"
 import { useMediaQuery } from "@/hooks/use-media-query"
 import { SeekBar, TransportControls, VolumeControl } from "./controls"
 import { ACTIVE_TOGGLE, SECONDARY } from "./player-tint"
+import { DevicePicker } from "./device-picker"
 
 /** Desktop persistent bottom bar — fixed-colour glass, same recipe as the mobile mini player. */
 export function PlayerBar() {
@@ -48,6 +49,7 @@ export function PlayerBar() {
           <SeekBar className="-mt-1" />
         </div>
         <div className="flex items-center justify-end gap-1">
+          <DevicePicker />
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="ghost" size="icon" disabled={!track || !!track.podcast} aria-label="Letras" aria-pressed={lyricsActive} className={cn("rounded-full", lyricsActive ? ACTIVE_TOGGLE : SECONDARY)} onClick={() => {

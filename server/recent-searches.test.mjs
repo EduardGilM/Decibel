@@ -21,7 +21,7 @@ async function setup(t) {
   const base = `http://127.0.0.1:${app.address().port}`
   const call = async (path, { token, method = "GET", body } = {}) => {
     const response = await fetch(base + path, { method, headers: { ...(body ? { "Content-Type": "application/json" } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: body ? JSON.stringify(body) : undefined })
-    return { status: response.status, body: await response.json().catch(() => null) }
+    return { status: response.status, cache: response.headers.get("cache-control"), body: await response.json().catch(() => null) }
   }
   const login = async (username) => (await call("/api/auth/login", { method: "POST", body: { username, password: username } })).body.token
   return { call, login, tick: (ms = 1000) => (clock += ms), now: () => clock }
@@ -39,6 +39,7 @@ test("recent searches: per profile, newest first, no duplicates, full item kept"
   assert.deepEqual(ids(again.body), ["a", "c", "b"], "a repeated search moves to the top")
   const list = (await call("/api/me/searches?source=ytdlp", { token: phone })).body
   assert.deepEqual(ids(list), ["a", "c", "b"], "the other device of the profile sees the same list")
+  assert.equal((await call("/api/me/searches?source=ytdlp", { token: phone })).cache, "no-store", "never cached by a browser, WebView or CDN")
   assert.equal(list[0].item.coverArt, "https://img/a.jpg")
   assert.equal(list[0].kind, "track")
   assert.equal((await call("/api/me/searches?source=ytdlp", { token: other })).body.length, 0, "isolated per profile")

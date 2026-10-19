@@ -2,6 +2,8 @@
 
 import Link from "next/link"
 import { useState } from "react"
+import { Link2 } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { FilterChips } from "@/components/music/filter-chips"
 import { LikedCover, useLibrary } from "@/components/layout/app-sidebar"
@@ -12,6 +14,9 @@ import { TopBar } from "@/components/music/top-bar"
 import { hrefPodcast, podcasts, usePodcastsEnabled } from "@/components/podcast/podcast-playback"
 import { podcastCover, type PodcastFollows } from "@/lib/podcasts"
 import { useData } from "@/lib/use-data"
+import { useProfile } from "@/stores/profile"
+import { useSession } from "@/stores/session"
+import { useUi } from "@/stores/ui"
 
 type Filter = "all" | "playlists" | "podcasts" | "albums" | "artists"
 
@@ -32,12 +37,17 @@ export default function LibraryPage() {
   const { data, error, loading } = useLibrary()
   const show = (f: Filter) => filter === "all" || filter === f
   const podcastsEnabled = usePodcastsEnabled()
+  const profile = useProfile((s) => s.status === "ready" && !!s.user)
+  const youtube = useSession((s) => s.mode === "ytdlp")
   const follows = useData<PodcastFollows>(podcastsEnabled ? "podcast-follows" : null, () => podcasts.getFollows())
   return (
     <div>
       <TopBar title="Tu biblioteca" />
       <div className="flex flex-col gap-3 px-2 pt-2 md:px-4">
-        <h1 className="hidden px-2 text-3xl font-bold tracking-tight md:block">Tu biblioteca</h1>
+        <div className="flex flex-wrap items-center justify-between gap-3 px-2">
+          <h1 className="hidden text-3xl font-bold tracking-tight md:block">Tu biblioteca</h1>
+          {profile && youtube && <Button variant="secondary" className="h-9 rounded-full px-4" onClick={() => useUi.setState({ playlistImportOpen: true })}><Link2 />Importar lista por enlace</Button>}
+        </div>
         <FilterChips
           className="px-2"
           value={filter}

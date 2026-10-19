@@ -1,4 +1,4 @@
-// Desktop builds (Tauri): Linux AppImage + .deb and Windows NSIS (cross-compiled from Linux with cargo-xwin).
+// Desktop builds (Tauri): Linux .deb and Windows NSIS (cross-compiled from Linux with cargo-xwin).
 //   DECIBEL_SERVER=https://music.example.com node scripts/build-desktop.mjs [--linux] [--windows] [--skip-web]
 // - The web build points to DECIBEL_SERVER (same as the Android build) and is placed in `out/`.
 // - Updates: endpoint `<DECIBEL_UPDATE_URL or DECIBEL_SERVER>/releases/latest.json` and the updater PUBLIC key
@@ -32,6 +32,6 @@ const configFile = join(root, "src-tauri", "tauri.desktop.json") // git-ignored
 writeFileSync(configFile, JSON.stringify(config, null, 2))
 const linux = args.has("--linux") || !args.has("--windows")
 const windows = args.has("--windows") || !args.has("--linux")
-if (linux) run("npx", ["tauri", "build", "--bundles", "appimage,deb", "--config", configFile])
+if (linux) run("npx", ["tauri", "build", "--bundles", "deb", "--config", configFile])
 if (windows) run("npx", ["tauri", "build", "--runner", "cargo-xwin", "--target", "x86_64-pc-windows-msvc", "--bundles", "nsis", "--config", configFile])
 console.log("Bundles in src-tauri/target/{release,x86_64-pc-windows-msvc/release}/bundle/")

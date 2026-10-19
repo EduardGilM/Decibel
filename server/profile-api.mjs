@@ -23,7 +23,7 @@ function setCookie(res, token, secure, maxAge = SESSION_DAYS * 86400) {
   res.setHeader("Set-Cookie", parts.join("; "))
 }
 
-async function readJson(req, limit = 64_000) {
+export async function readJson(req, limit = 64_000) {
   if (!req.headers["content-type"]?.startsWith("application/json")) throw new MusicError("Se requiere JSON.", 415)
   const chunks = []
   let bytes = 0
@@ -137,6 +137,7 @@ export async function createProfileApi({ db = openDb(":memory:"), seed = true, a
         if (method === "PUT") { library.like(user.id, source, kind, item); return json({ ok: true }), true }
         if (method === "DELETE") { library.unlike(user.id, source, kind, id); return json({ ok: true }), true }
       }
+      if (path === "/api/me/revision" && method === "GET") return json({ revision: library.revision(user.id, src()) }), true
       if (path === "/api/me/history") {
         if (method === "GET") return json(library.history(user.id, src(), url.searchParams.get("limit"))), true
         if (method === "POST") { const { source, ...entry } = await readJson(req); library.addHistory(user.id, source, entry); return json({ ok: true }, 201), true }
@@ -159,7 +160,9 @@ export async function createProfileApi({ db = openDb(":memory:"), seed = true, a
         if (method === "PUT") return json(library.saveSettings(user.id, (await readJson(req)).settings)), true
       }
       if (path === "/api/me/import" && method === "POST") {
-        const { source, ...data } = await readJson(req, 8_000_000)
+        const { source, profileId, ...data } = await readJson(req, 8_000_000)
+        // A preview may outlive its session (for example, after switching profiles in another tab).
+        if (profileId !== undefined && profileId !== user.id) throw new MusicError("El perfil ha cambiado. Abre de nuevo la importación.", 409)
         return json(library.import(user.id, source, data)), true
       }
 

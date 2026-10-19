@@ -170,7 +170,75 @@ export function createYtDlpRunner(binary, { cacheDir, python, worker, workers } 
   }
 }
 
-export async function createMusicService({ dataDir, run, catalog }) {
+const CATALOG_SLOTS = 3
+const CATALOG_GRACE_MS = 2000
+const busy = () => Object.assign(new MusicError("Hay varias consultas de música en curso. Espera unos segundos.", 429), { retryAfter: 2 })
+export const aborted = () => new MusicError("Consulta cancelada.", 499)
+
+/** Concurrency limit with a bounded, abortable waiting line. acquire() resolves to a release function. */
+export function createSlots(size, { maxWaiting = 40, waitMs = 25_000 } = {}) {
+  let active = 0
+  const waiting = []
+  const next = () => {
+    while (active < size && waiting.length) waiting.shift().grant()
+  }
+  const lease = () => {
+    active++
+    let done = false
+    return () => { if (!done) { done = true; active--; next() } }
+  }
+  return {
+    get active() { return active },
+    get waiting() { return waiting.length },
+    tryAcquire() { return active < size ? lease() : null },
+    acquire(signal) {
+      if (signal?.aborted) return Promise.reject(aborted())
+      if (active < size) return Promise.resolve(lease())
+      if (waiting.length >= maxWaiting) return Promise.reject(busy())
+      return new Promise((resolve, reject) => {
+        const leave = (error) => {
+          const index = waiting.indexOf(item)
+          if (index >= 0) waiting.splice(index, 1)
+          clearTimeout(timer); signal?.removeEventListener("abort", onAbort)
+          reject(error)
+        }
+        const onAbort = () => leave(aborted())
+        const timer = setTimeout(() => leave(busy()), waitMs)
+        const item = { grant: () => { clearTimeout(timer); signal?.removeEventListener("abort", onAbort); resolve(lease()) } }
+        signal?.addEventListener("abort", onAbort, { once: true })
+        waiting.push(item)
+      })
+    },
+  }
+}
+
+/**
+ * Waits for a shared catalog lookup on behalf of one request. Without a signal (internal callers) the lookup is
+ * pinned and always runs to the end; with one, the lookup is cancelled once every request waiting for it is gone.
+ */
+function joinCatalog(entry, signal) {
+  if (entry.settled) return entry.promise
+  if (!signal) { entry.pinned = true; clearTimeout(entry.kill); return entry.promise }
+  if (signal.aborted) return Promise.reject(aborted())
+  entry.users++
+  clearTimeout(entry.kill)
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      reject(aborted())
+      if (--entry.users === 0 && !entry.pinned && !entry.settled) {
+        entry.kill = setTimeout(() => { if (entry.users === 0 && !entry.pinned && !entry.settled) entry.controller.abort() }, entry.grace)
+        entry.kill.unref?.()
+      }
+    }
+    signal.addEventListener("abort", onAbort, { once: true })
+    entry.promise.then(
+      (value) => { signal.removeEventListener("abort", onAbort); entry.users--; resolve(value) },
+      (error) => { signal.removeEventListener("abort", onAbort); entry.users--; reject(error) },
+    )
+  })
+}
+
+export async function createMusicService({ dataDir, run, catalog, catalogGraceMs = CATALOG_GRACE_MS }) {
   await mkdir(dataDir, { recursive: true })
   const libraryFile = resolve(dataDir, "library.json")
   let library
@@ -193,20 +261,32 @@ export async function createMusicService({ dataDir, run, catalog }) {
   const streamCache = new Map()
   const catalogRequests = new Map()
   let lastDiscovery = { newest: [], random: [] }
-  let activeCatalogRequests = 0
-  const fromCatalog = async (operation, value, ttl = 5 * 60_000) => {
+  // YouTube Music lookups run as one Python process each: at most CATALOG_SLOTS at once, the rest wait in line
+  // (a burst of suggestions plus a full search must not fail). Identical lookups share one process, and a
+  // process nobody waits for any more (the client aborted: a new keystroke, Enter) is killed after a short
+  // grace, so the full search for the same text can still reuse the suggestion's work.
+  const slots = createSlots(CATALOG_SLOTS, { maxWaiting: 40, waitMs: 25_000 })
+  const fromCatalog = async (operation, value, ttl = 5 * 60_000, signal) => {
     const key = `${operation}:${value}`
-    const cached = catalogRequests.get(key)
-    if (cached && cached.expires > Date.now()) return cached.promise
-    if (!catalog) throw new MusicError("Falta YouTube Music en el servidor. Ejecuta npm run music:setup.", 502)
-    if (activeCatalogRequests >= 3) throw new MusicError("Hay varias consultas de música en curso. Espera unos segundos.", 429)
-    activeCatalogRequests++
-    const promise = Promise.resolve().then(() => catalog(operation, value))
-      .catch((error) => { catalogRequests.delete(key); throw error })
-      .finally(() => { activeCatalogRequests-- })
-    catalogRequests.set(key, { promise, expires: Date.now() + ttl })
-    if (catalogRequests.size > 100) catalogRequests.delete(catalogRequests.keys().next().value)
-    return promise
+    let entry = catalogRequests.get(key)
+    if (!entry || entry.expires <= Date.now()) {
+      if (!catalog) throw new MusicError("Falta YouTube Music en el servidor. Ejecuta npm run music:setup.", 502)
+      const controller = new AbortController()
+      entry = { expires: Date.now() + ttl, users: 0, pinned: false, settled: false, controller, kill: undefined, grace: catalogGraceMs }
+      const current = entry
+      const start = (release) => Promise.resolve().then(() => catalog(operation, value, { signal: controller.signal })).finally(release)
+      const free = slots.tryAcquire() // a free slot starts in this same tick, as before
+      current.promise = (free ? start(free) : slots.acquire(controller.signal).then(start))
+        .then((result) => { current.settled = true; return result }, (error) => {
+          current.settled = true
+          if (catalogRequests.get(key) === current) catalogRequests.delete(key)
+          throw error
+        })
+      current.promise.catch(() => {}) // the waiting requests get the error; nobody left must not crash the server
+      catalogRequests.set(key, current)
+      if (catalogRequests.size > 100) catalogRequests.delete(catalogRequests.keys().next().value)
+    }
+    return joinCatalog(entry, signal)
   }
 
   const remember = (track) => {
@@ -350,15 +430,15 @@ export async function createMusicService({ dataDir, run, catalog }) {
       const [version, source] = await Promise.all([run(["--version"], 15_000), fromCatalog("health", "", 60_000)])
       return { ok: true, version, catalog: source, tracks: tracks().length }
     },
-    async search(query, type = "all") {
+    async search(query, type = "all", { signal } = {}) {
       if (!["all", "tracks", "albums", "artists"].includes(type)) throw new MusicError("Tipo de búsqueda no válido.")
       const { target, flat } = searchTarget(query)
       const text = target.slice("ytsearch12:".length)
       const [result, albumResults, artistResults] = flat ? await Promise.all([
-        ["all", "tracks"].includes(type) ? fromCatalog("search", text, 60_000) : [],
-        ["all", "albums"].includes(type) ? fromCatalog("searchAlbums", text, 60_000) : [],
-        ["all", "artists"].includes(type) ? fromCatalog("searchArtists", text, 60_000) : [],
-      ]) : [type === "artists" ? [] : [await fromCatalog("song", new URL(target).searchParams.get("v"))], [], []]
+        ["all", "tracks"].includes(type) ? fromCatalog("search", text, 60_000, signal) : [],
+        ["all", "albums"].includes(type) ? fromCatalog("searchAlbums", text, 60_000, signal) : [],
+        ["all", "artists"].includes(type) ? fromCatalog("searchArtists", text, 60_000, signal) : [],
+      ]) : [type === "artists" ? [] : [await fromCatalog("song", new URL(target).searchParams.get("v"), undefined, signal)], [], []]
       const seen = new Set()
       const songs = result.filter((song) => {
         if (!playableSong(song) || seen.has(song.videoId)) return false

@@ -261,6 +261,6 @@ test("progress survives database reopen and migrating a pre-podcast database pre
   db.close(); db = openDb(path)
   podcasts = createPodcastService({ db, request: fixtureRequest() })
   assert.equal(podcasts.getProgress(user.id, id).position, 300)
-  assert.equal(db.prepare("PRAGMA user_version").get().user_version, 4)
+  assert.equal(db.prepare("PRAGMA user_version").get().user_version, 5)
   db.close()
 })

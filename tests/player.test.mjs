@@ -9,14 +9,38 @@ globalThis.localStorage = {
 }
 globalThis.window = { localStorage: globalThis.localStorage }
 const { usePlayer } = await import("../src/stores/player.ts")
+const { configurePlaybackRouter } = await import("../src/lib/audio/device-protocol.ts")
 const player = () => usePlayer.getState()
 const tracks = ["aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc"].map((id) => ({ id: `yt:${id}`, title: id, artist: "Artista", album: "Álbum", duration: 10 }))
 const [a, b, c] = tracks
 
 beforeEach(() => {
+  configurePlaybackRouter(null)
   player().configureRecommendations(null)
   usePlayer.setState(usePlayer.getInitialState(), true)
   storage.clear()
+})
+
+test("remote playback routes transport and queue actions without changing local audio", async () => {
+  player().playList(tracks)
+  let seeks = 0
+  usePlayer.setState({ audio: { set currentTime(_) { seeks++ } }, position: 4 })
+  const commands = []
+  configurePlaybackRouter((command) => { commands.push(command); return true })
+  player().toggle()
+  player().seek(8)
+  await player().next()
+  player().playList([b], 0, "Remoto")
+  player().setVolume(0.2)
+  player().moveQueueItem(0, 2)
+  assert.deepEqual(commands.map((c) => c.action), ["toggle", "seek", "next", "playList", "setVolume", "moveQueueItem"])
+  assert.equal(player().current(), a)
+  assert.equal(player().position, 4)
+  assert.equal(player().isPlaying, true)
+  assert.equal(seeks, 0)
+  configurePlaybackRouter(null)
+  player().toggle()
+  assert.equal(player().isPlaying, false)
 })
 
 test("repeat cycles through the three modes", () => {

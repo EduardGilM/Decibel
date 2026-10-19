@@ -16,11 +16,11 @@ const artistId = "UCaaaaaaaaaaaaaaaaaaaaaa", relatedId = "UCbbbbbbbbbbbbbbbbbbbb
 const artist = { browseId: artistId, artist: "Artista principal", thumbnails: [{ url: "https://example.com/small.jpg", width: 60 }, { url: "https://example.com/large.jpg", width: 800 }] }
 const song = (videoId, extra = {}) => ({ videoId, title: `Tema ${videoId}`, artists: [{ id: artistId, name: artist.artist }], album: { id: "MPREb_aaaaaaaaaaa", name: "Álbum" }, ...extra })
 
-async function fixture(t, catalog, library) {
+async function fixture(t, catalog, library, options = {}) {
   const dataDir = await mkdtemp(join(tmpdir(), "decibel-artists-"))
   t.after(() => rm(dataDir, { recursive: true, force: true }))
   if (library) await writeFile(join(dataDir, "library.json"), JSON.stringify(library))
-  const music = await createMusicService({ dataDir, catalog, run: () => assert.fail("Artists never need yt-dlp or audio downloads") })
+  const music = await createMusicService({ dataDir, catalog, ...options, run: () => assert.fail("Artists never need yt-dlp or audio downloads") })
   return { music, dataDir }
 }
 
@@ -68,23 +68,98 @@ test("artist-only search makes no song/album call and invalid filters/IDs fail b
   assert.equal(calls.length, 1)
 })
 
-test("busy parallel searches reject cleanly, handle outstanding failures and can retry", async (t) => {
+test("searches beyond the three running catalogue lookups wait in line instead of failing", async (t) => {
   const pending = []
   const { music } = await fixture(t, (op, query) => new Promise((resolve, reject) => pending.push({ op, query, resolve, reject })))
-  const first = music.search("existing", "tracks")
-  await Promise.resolve()
-  await assert.rejects(music.search("new"), { status: 429 })
-  await Promise.resolve()
+  const first = music.search("existing", "tracks"), second = music.search("other", "tracks"), third = music.search("third", "tracks")
+  const full = music.search("new") // three more lookups: all wait, none is rejected
+  await new Promise((done) => setImmediate(done))
+  assert.deepEqual(pending.map((work) => work.query), ["existing", "other", "third"])
   for (const work of pending.splice(0)) {
     if (work.query === "existing") work.resolve([])
     else work.reject(new Error("outstanding catalogue failure"))
   }
   await first
+  await assert.rejects(second, /outstanding/)
+  await assert.rejects(third)
   await new Promise((done) => setImmediate(done))
-  const retry = music.search("new")
-  await Promise.resolve()
+  assert.deepEqual(pending.map((work) => work.op).sort(), ["search", "searchAlbums", "searchArtists"])
   pending.splice(0).forEach((work) => work.resolve([]))
-  assert.deepEqual(await retry, { tracks: [], albums: [], artists: [] })
+  assert.deepEqual(await full, { tracks: [], albums: [], artists: [] })
+})
+
+test("an aborted suggestion frees its slot (process killed after a grace) and Enter reuses it within the grace", async (t) => {
+  const pending = []
+  const { music } = await fixture(t, (op, query, { signal } = {}) => new Promise((resolve, reject) => {
+    const work = { op, query, resolve, signal, killed: false }
+    signal?.addEventListener("abort", () => { work.killed = true; reject(Object.assign(new Error("killed"), { status: 499 })) })
+    pending.push(work)
+  }), undefined, { catalogGraceMs: 30 })
+  const typing = ["en", "en tu", "en tu aguje"].map((text) => { const c = new AbortController(); return { c, p: music.search(text, "tracks", { signal: c.signal }) } })
+  const last = new AbortController(), suggestion = music.search("en tu agujero", "tracks", { signal: last.signal })
+  await new Promise((done) => setImmediate(done))
+  assert.equal(pending.length, 3, "three run, the fourth waits")
+  for (const { c, p } of typing) { c.abort(); await assert.rejects(p, { status: 499 }) }
+  await new Promise((done) => setTimeout(done, 60))
+  assert.ok(pending.slice(0, 3).every((work) => work.killed), "nobody waits for the stale prefixes: their processes are killed")
+  await new Promise((done) => setImmediate(done))
+  const running = pending.find((work) => work.query === "en tu agujero")
+  assert.ok(running && !running.killed, "the queued suggestion got a freed slot")
+  last.abort() // Enter: the dropdown closes and aborts its request...
+  await assert.rejects(suggestion, { status: 499 })
+  const full = new AbortController(), page = music.search("en tu agujero", "all", { signal: full.signal }) // ...and the page asks right away
+  await new Promise((done) => setTimeout(done, 60))
+  assert.equal(running.killed, false, "the full search joined the suggestion's lookup before the grace ended")
+  assert.equal(pending.filter((work) => work.query === "en tu agujero" && work.op === "search").length, 1, "no second song lookup")
+  running.resolve([song("aaaaaaaaaaa")])
+  await new Promise((done) => setImmediate(done))
+  pending.filter((work) => work.op !== "search").forEach((work) => work.resolve([]))
+  assert.equal((await page).tracks[0].id, "yt:aaaaaaaaaaa")
+})
+
+test("the waiting line is bounded and a waiter that gives up leaves it", async () => {
+  const { createSlots } = await import("./ytdlp.mjs")
+  const slots = createSlots(1, { maxWaiting: 1, waitMs: 20 })
+  const release = slots.tryAcquire()
+  const gone = new AbortController()
+  const waiter = slots.acquire(gone.signal)
+  await assert.rejects(slots.acquire(), { status: 429 }, "the line is full: last resort")
+  gone.abort()
+  await assert.rejects(waiter, { status: 499 })
+  assert.equal(slots.waiting, 0)
+  await assert.rejects(slots.acquire(), { status: 429 }, "waiting too long is still answered")
+  release()
+  const next = await slots.acquire()
+  assert.equal(slots.active, 1)
+  next()
+  assert.equal(slots.active, 0)
+})
+
+test("HTTP: a search whose client disconnects releases its catalogue slot", async (t) => {
+  const pending = []
+  const { music } = await fixture(t, (op, query, { signal } = {}) => new Promise((resolve, reject) => {
+    const work = { op, query, resolve, killed: false }
+    signal?.addEventListener("abort", () => { work.killed = true; reject(Object.assign(new Error("killed"), { status: 499 })) })
+    pending.push(work)
+  }), undefined, { catalogGraceMs: 10 })
+  const profiles = await createProfileApi({ seed: false })
+  const user = await profiles.accounts.createUser({ username: "Music Fixture", password: "fixture-password" }), token = profiles.accounts.createSession(user.id)
+  const app = await createApp({ music, profiles })
+  app.listen(0, "127.0.0.1"); await once(app, "listening")
+  t.after(async () => { await new Promise((done) => { app.close(done); app.closeAllConnections() }); profiles.db.close() })
+  const base = `http://127.0.0.1:${app.address().port}/api/music`
+  const client = new AbortController()
+  const gone = fetch(`${base}/search?q=stale&type=tracks`, { headers: { Authorization: `Bearer ${token}` }, signal: client.signal }).catch(() => "aborted")
+  while (!pending.length) await new Promise((done) => setTimeout(done, 5))
+  client.abort()
+  assert.equal(await gone, "aborted")
+  while (!pending[0].killed) await new Promise((done) => setTimeout(done, 5))
+  const ok = fetch(`${base}/search?q=fresh&type=tracks`, { headers: { Authorization: `Bearer ${token}` } })
+  while (pending.length < 2) await new Promise((done) => setTimeout(done, 5))
+  pending[1].resolve([])
+  const response = await ok
+  assert.equal(response.status, 200)
+  assert.equal(response.headers.get("cache-control"), "no-store")
 })
 
 test("artist recommendations prioritise the full song list, accept credited feats and exclude other artists, top songs and duplicates", async (t) => {

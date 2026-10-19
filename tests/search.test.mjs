@@ -76,3 +76,29 @@ test("history and pending changes survive reloads while the search draft and foc
   useSearch.getState().clearRecent(scope)
   assert.deepEqual(ids(), [])
 })
+
+test("the recent list of a 0.1.9 device (unversioned storage) survives the upgrade, so it can be uploaded once", async () => {
+  // 0.1.9 saved only { recent } with no version; zustand drops unversioned state unless the store migrates it.
+  storage.set("decibel-search", JSON.stringify({ state: { recent: { [scope]: [track("old1"), track("old2")] } }, version: 0 }))
+  await useSearch.persist.rehydrate()
+  assert.deepEqual(useSearch.getState().recent[scope].map((t) => t.id), ["yt:old1", "yt:old2"])
+  assert.deepEqual(useSearch.getState().rows, {})
+  assert.deepEqual(useSearch.getState().queue, {})
+  // Typing in the search box persists the store: the old list must still be there afterwards.
+  useSearch.getState().setQ("x")
+  assert.deepEqual(JSON.parse(storage.get("decibel-search")).state.recent[scope].map((t) => t.id), ["yt:old1", "yt:old2"])
+  // Junk in old storage never breaks start-up.
+  storage.set("decibel-search", JSON.stringify({ state: { recent: "nope" }, version: 0 }))
+  await useSearch.persist.rehydrate()
+  assert.deepEqual(useSearch.getState().recent, {})
+})
+
+test("0.1.10/0.1.11 storage (version 1) keeps its synced rows and pending queue", async () => {
+  const rows = { [scope]: [{ kind: "track", item: track("s"), at: 5 }] }
+  const queue = { [scope]: [{ n: 3, op: "add", kind: "track", item: track("q"), at: 6 }] }
+  storage.set("decibel-search", JSON.stringify({ state: { recent: {}, rows, queue, seq: 3 }, version: 1 }))
+  await useSearch.persist.rehydrate()
+  assert.deepEqual(useSearch.getState().rows, rows)
+  assert.deepEqual(useSearch.getState().queue, queue)
+  assert.equal(useSearch.getState().seq, 3)
+})

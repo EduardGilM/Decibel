@@ -114,9 +114,9 @@ export function LyricsPanel({ track, className, scrollable = false, preview = fa
   // reach this nested scroller inside the masked full-player scroll area, so the header paints its own blurred copy
   // of the lines (kept in sync with the scroll) while the real lines melt away under it: same look everywhere.
   if (floatingHead) return (
-    <section aria-label="Letras" className="relative min-w-0" style={{ "--lyrics-head": `${headHeight}px` } as CSSProperties}>
-      <div ref={headRef} data-lyrics-head="" className={cn("absolute inset-x-0 top-0 z-10 !pb-3", className)}>
-        <div aria-hidden className="lyrics-head-glass pointer-events-none absolute inset-x-0 top-0 -bottom-6 overflow-hidden">
+    <section aria-label="Letras" className="relative min-w-0 rounded-t-[inherit]" style={{ "--lyrics-head": `${headHeight}px` } as CSSProperties}>
+      <div ref={headRef} data-lyrics-head="" className={cn("absolute inset-x-0 top-0 z-10 rounded-t-[inherit] !pb-3", className)}>
+        <div aria-hidden className="lyrics-head-glass pointer-events-none absolute inset-x-0 top-0 -bottom-6 overflow-hidden rounded-t-[inherit]">
           {lines && (
             <div className="absolute inset-0 overflow-hidden blur-[24px] saturate-[1.4]">
               <div ref={ghostRef} inert className={cn("!pt-1 will-change-transform", className)}>{body}{renderLines(true)}</div>

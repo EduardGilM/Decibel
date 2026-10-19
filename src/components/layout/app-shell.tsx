@@ -4,6 +4,8 @@ import { usePathname, useRouter } from "next/navigation"
 import { Suspense, useEffect, useState, type ReactNode } from "react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { AudioEngine } from "@/components/music/audio-engine"
+import { DeviceSync } from "@/components/music/device-sync"
+import { useDevices } from "@/stores/devices"
 import { DesktopMediaBridge } from "@/components/music/desktop-media-bridge"
 import { AppDialogs } from "@/components/music/app-dialogs"
 import { PlaylistPicker } from "@/components/music/playlist-picker"
@@ -32,6 +34,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const mode = useSession((s) => s.mode)
   const isLogin = pathname.startsWith("/login")
   const hasTrack = usePlayer((s) => s.queue.length > 0)
+  const localPlayback = useDevices((s) => s.localPlayback)
 
   useEffect(() => {
     if (hydrated && !mode && !isLogin) router.replace("/login/")
@@ -50,7 +53,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="fixed inset-0 flex flex-col bg-background pt-[var(--safe-top)] pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)] md:gap-2 md:p-2">
-      <AudioEngine />
+      <DeviceSync />
+      {localPlayback && <AudioEngine />}
       <DesktopMediaBridge />
       <ThemeController />
       <AppDialogs />

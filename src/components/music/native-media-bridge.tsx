@@ -10,6 +10,9 @@ import { describePauses, pauseLog, type PauseEntry } from "@/lib/pause-log"
 import { useProvider } from "@/lib/providers"
 import { useAuthenticatedArtwork } from "@/hooks/use-authenticated-artwork"
 import { usePlayer } from "@/stores/player"
+import { useProfile } from "@/stores/profile"
+import { useSession } from "@/stores/session"
+import { browseAuto, resolveAutoPlay, searchAuto } from "@/lib/android-auto"
 
 /** Exposed by the Android shell (DecibelMedia.kt) through addJavascriptInterface. */
 interface DecibelNative {
@@ -32,6 +35,11 @@ interface DecibelNative {
   /** bridge 6 (0.1.11): installer with the APK already downloaded, after granting «Instalar apps desconocidas» */
   resumeInstall?(): boolean
   canInstallPackages?(): boolean
+  /** Bridge 7: Android Auto uses the same authenticated provider and player as the phone. */
+  autoReady?(ready: boolean): void
+  autoResult?(request: number, json: string): void
+  autoRequestActive?(request: number): boolean
+  autoRefresh?(): void
 }
 
 /** Notification permission as last reported by the shell (null: not Android / unknown). */
@@ -86,6 +94,7 @@ declare global {
   interface Window {
     DecibelNative?: DecibelNative
     __decibelNative?: (command: string, arg: number | null) => void
+    __decibelAuto?: (request: { id: number; action: string; value: string }) => void
   }
 }
 
@@ -104,8 +113,58 @@ export function nativeShareImage(dataUrl: string, mime: string, text: string) {
 export function NativeMediaBridge() {
   const track = usePlayer((s) => s.queue[s.index])
   const provider = useProvider()
+  const profileStatus = useProfile((s) => s.status)
+  const mode = useSession((s) => s.mode)
   const cover = useAuthenticatedArtwork(provider.coverUrl(track?.coverArt, 512))
   const ducked = useRef<number | null>(null)
+
+  useEffect(() => {
+    const bridge = native()
+    if (!bridge?.autoReady || !bridge.autoResult) return
+    const ready = !!mode && ["ready", "offline", "unavailable"].includes(profileStatus)
+    let disposed = false
+    let playbackRequest = 0
+    window.__decibelAuto = async ({ id, action, value }) => {
+      if (!ready || disposed) return
+      const playRequest = action === "browse" ? 0 : ++playbackRequest
+      try {
+        const queue = usePlayer.getState().queue
+        if (action === "browse") {
+          const items = await browseAuto(provider, queue, value)
+          if (!disposed) bridge.autoResult!(id, JSON.stringify({ items }))
+          return
+        }
+        const selection = action === "search"
+          ? await searchAuto(provider, queue, value)
+          : await resolveAutoPlay(provider, queue, value)
+        if (disposed || playRequest !== playbackRequest || !bridge.autoRequestActive?.(id)) return
+        const player = usePlayer.getState()
+        if ("inQueue" in selection && selection.inQueue) {
+          // Queue may have changed while the request was in flight.
+          const track = selection.tracks[selection.index]
+          const index = player.queue[selection.index]?.id === track.id ? selection.index : player.queue.findIndex((t) => t.id === track.id)
+          if (index < 0) throw new Error("La canción ya no está en la cola")
+          player.jumpTo(index)
+        } else player.playList(selection.tracks, selection.index, selection.label)
+        bridge.autoResult!(id, JSON.stringify({ items: [] }))
+      } catch (error) {
+        if (!disposed && (action === "browse" || playRequest === playbackRequest)) bridge.autoResult!(id, JSON.stringify({
+          error: error instanceof Error ? error.message : "No se pudo cargar la música",
+        }))
+      }
+    }
+    bridge.autoReady(ready)
+    let queue = usePlayer.getState().queue
+    const offQueue = usePlayer.subscribe((state) => {
+      if (state.queue !== queue) { queue = state.queue; bridge.autoRefresh?.() }
+    })
+    return () => {
+      disposed = true
+      offQueue()
+      delete window.__decibelAuto
+      bridge.autoReady!(false)
+    }
+  }, [provider, profileStatus, mode])
 
   // native → JS
   useEffect(() => {
@@ -113,7 +172,7 @@ export function NativeMediaBridge() {
     window.__decibelNative = (command, arg) => {
       const p = usePlayer.getState()
       switch (command) {
-        case "play": p.setPlaying(true); break
+        case "play": if (p.queue.length) p.setPlaying(true); break
         case "pause": p.setPlaying(false); break
         case "next": void p.next(); break
         case "prev": p.prev(); break
