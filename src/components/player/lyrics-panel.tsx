@@ -3,10 +3,13 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react"
 import { Loader2, Maximize2, Mic } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { activeLyricsLine, findLyricsWithRetry, type LyricsResult } from "@/lib/lyrics"
+import { activeLyricsLine, centeredLyricsScroll, findLyricsWithRetry, lyricsLineState, type LyricsResult } from "@/lib/lyrics"
 import type { Track } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { usePlayer } from "@/stores/player"
+
+/** Preview cards keep the active line in the upper third (the lines that follow stay readable below it). */
+const PREVIEW_ANCHOR = 0.3
 
 /** `preview`: Spotify-style "Vista previa de la letra" card for the desktop side panel (big bold lines, white highlight). */
 export function LyricsPanel({ track, className, scrollable = false, preview = false, title, onExpand }: { track: Track; className?: string; scrollable?: boolean; preview?: boolean; title?: string; onExpand?: () => void }) {
@@ -16,7 +19,8 @@ export function LyricsPanel({ track, className, scrollable = false, preview = fa
   const key = `${track.id}:${track.title}:${track.artist}:${lookupDuration}`
   const [state, setState] = useState<{ key: string; result?: LyricsResult | null; error?: string }>({ key: "" })
   const [retry, setRetry] = useState(0)
-  const currentRef = useRef<HTMLButtonElement>(null)
+  const currentRef = useRef<HTMLElement>(null)
+  const linesRef = useRef<HTMLDivElement>(null)
   const headRef = useRef<HTMLDivElement>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const ghostRef = useRef<HTMLDivElement>(null)
@@ -46,20 +50,35 @@ export function LyricsPanel({ track, className, scrollable = false, preview = fa
   const current = state.key === key ? state : { key }
   const result = current.result
   const active = result ? activeLyricsLine(result.lines, position) : -1
+  const floatingHead = preview && scrollable
+
+  // Give the first and last synced lines enough space to reach the centre as well.
+  useLayoutEffect(() => {
+    const lines = linesRef.current
+    const viewport = lines?.closest<HTMLElement>("[data-lyrics-viewport], [data-slot=scroll-area-viewport]")
+    if (!lines || !viewport) return
+    const measure = () => lines.closest("section")?.style.setProperty("--lyrics-center-space", `${Math.max(0, (viewport.clientHeight - (floatingHead ? headHeight : 0)) / 2)}px`)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(viewport)
+    return () => observer.disconnect()
+  }, [result, floatingHead, headHeight])
 
   useEffect(() => {
-    const line = currentRef.current
-    const viewport = line?.closest<HTMLElement>("[data-lyrics-viewport], [data-slot=scroll-area-viewport]")
-    if (!line || !viewport) return
+    const line = active >= 0 ? currentRef.current : null
+    // Only ever scroll the lyrics' own scroller (never the side panel or the page around the card).
+    const viewport = floatingHead ? viewportRef.current : line?.closest<HTMLElement>("[data-lyrics-viewport], [data-slot=scroll-area-viewport]")
+    if (!viewport) return
+    if (!line) { if (floatingHead) viewport.scrollTo({ top: 0 }); return } // song start: first lines in view
     const rect = line.getBoundingClientRect(), bounds = viewport.getBoundingClientRect()
     const head = viewport.parentElement?.querySelector<HTMLElement>(":scope > [data-lyrics-head]")?.offsetHeight ?? 0 // header over the lines
-    if (rect.top < bounds.top + head + 24 || rect.bottom > bounds.bottom - 24) {
-      viewport.scrollTo({ top: viewport.scrollTop + rect.top - bounds.top - bounds.height * 0.35, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" })
-    }
-  }, [active, key])
+    viewport.scrollTo({
+      top: centeredLyricsScroll({ scrollTop: viewport.scrollTop, lineTop: rect.top, lineHeight: rect.height, viewportTop: bounds.top, viewportHeight: viewport.clientHeight, scrollHeight: viewport.scrollHeight, headerHeight: head, anchor: floatingHead ? PREVIEW_ANCHOR : 0.5 }),
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth",
+    })
+  }, [active, key, headHeight, floatingHead])
 
   // Preview cards: the header floats over the scroller; its height drives the spacer and the fade of the lines.
-  const floatingHead = preview && scrollable
   useEffect(() => {
     const head = headRef.current
     if (!floatingHead || !head) return
@@ -93,12 +112,12 @@ export function LyricsPanel({ track, className, scrollable = false, preview = fa
   )
   // `ghost`: the blurred copy painted inside the floating header (no focus, no ref, no clicks).
   const renderLines = (ghost = false) => result && !result.instrumental ? (result.lines.length ? (
-    <div className={cn("flex flex-col", preview ? "gap-2" : "gap-3")}>
+    <div ref={ghost ? undefined : linesRef} style={preview && scrollable ? { paddingBottom: "var(--lyrics-center-space, 0px)" } : { paddingBlock: "var(--lyrics-center-space, 0px)" }} className={cn("flex flex-col", preview ? "gap-2" : "gap-3")}>
       {result.lines.map((line, index) => line.text ? (
-        <button key={`${line.time}:${index}`} ref={!ghost && index === active ? currentRef : undefined} type="button" tabIndex={ghost ? -1 : undefined} aria-current={index === active ? "true" : undefined} aria-label={`Ir a ${Math.floor(line.time / 60)}:${String(Math.floor(line.time % 60)).padStart(2, "0")}`} onClick={ghost ? undefined : () => usePlayer.getState().seek(line.time)} className={cn("rounded-sm py-1 text-left break-words transition-colors focus-visible:outline-2 focus-visible:outline-ring", preview ? "text-xl leading-snug font-bold" : "text-lg leading-relaxed font-semibold", index === active ? (preview ? "text-foreground" : "text-primary") : preview ? "text-foreground/40 hover:text-foreground/80" : "text-muted-foreground hover:text-foreground")}>
+        <button key={`${line.time}:${index}`} ref={!ghost && index === active ? (node) => { currentRef.current = node } : undefined} data-lyrics-state={lyricsLineState(index, active)} type="button" tabIndex={ghost ? -1 : undefined} aria-current={index === active ? "true" : undefined} aria-label={`Ir a ${Math.floor(line.time / 60)}:${String(Math.floor(line.time % 60)).padStart(2, "0")}`} onClick={ghost ? undefined : () => usePlayer.getState().seek(line.time)} className={cn("rounded-sm py-1 text-left break-words transition-[color,opacity,scale] duration-300 ease-out motion-reduce:transition-none focus-visible:outline-2 focus-visible:outline-ring", preview ? "text-xl leading-snug font-bold" : "text-lg leading-relaxed font-semibold", index === active ? (preview ? "text-foreground scale-[1.02]" : "text-primary scale-[1.01]") : index < active ? "text-foreground/30 hover:text-foreground/70" : preview ? "text-foreground/55 hover:text-foreground/80" : "text-muted-foreground hover:text-foreground")}>
           {line.text}
         </button>
-      ) : <div key={`${line.time}:${index}`} className="h-3" aria-hidden />)}
+      ) : <div key={`${line.time}:${index}`} ref={!ghost && index === active ? (node) => { currentRef.current = node } : undefined} className="h-3" aria-hidden />)}
     </div>
   ) : <p className="text-base leading-relaxed whitespace-pre-line text-foreground/85">{result.text}</p>) : null
   const lines = renderLines()

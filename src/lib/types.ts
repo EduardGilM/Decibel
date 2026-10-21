@@ -111,6 +111,9 @@ export interface Starred {
  * The UI only ever talks to a MusicProvider.
  */
 export interface MusicProvider {
+  readonly offlineScope?: string
+  /** Full audio bytes, from the Decibel stream endpoint for the main source. Never an extractor on device. */
+  downloadRequest?(track: Track): Promise<{ url: string; headers?: Record<string, string> }>
   readonly kind: DataSource
   ping(): Promise<void>
   getHome(): Promise<HomeData>

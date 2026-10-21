@@ -69,3 +69,24 @@ test("an older session check cannot clear a later successful login", async (t) =
   assert.equal(useProfile.getState().status, "ready")
   assert.deepEqual(useProfile.getState().user, user)
 })
+
+test("revalidation keeps the active session usable until a real authentication failure", async (t) => {
+  useProfile.setState({ user, status: "ready" })
+  let finish
+  t.mock.method(globalThis, "fetch", () => new Promise((resolve) => { finish = resolve }))
+  const checking = useProfile.getState().check()
+  assert.equal(useProfile.getState().status, "ready")
+  finish(Response.json({}, { status: 401 }))
+  await checking
+  assert.equal(useProfile.getState().status, "anon")
+  assert.equal(useProfile.getState().user, null)
+})
+
+test("a temporary same-origin 404 never drops the saved profile or changes its cache scope", async (t) => {
+  values.delete("decibel-server-url")
+  useProfile.setState({ user, status: "ready" })
+  t.mock.method(globalThis, "fetch", async () => Response.json({}, { status: 404 }))
+  await useProfile.getState().check()
+  assert.equal(useProfile.getState().status, "offline")
+  assert.deepEqual(useProfile.getState().user, user)
+})

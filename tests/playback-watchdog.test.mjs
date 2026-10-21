@@ -99,6 +99,18 @@ test("media errors use the same budget, immediately", () => {
   assert.equal(dog.fail({ ...s, key: "2:yt:b" }).type, "retry")
 })
 
+test("minutes offline and repeated network errors preserve the song; reconnect gets a fresh retry budget", () => {
+  const { dog, s, run } = rig()
+  run(1, { resolved: true, position: 73 })
+  assert.equal(run(13)[0].attempt, 1)
+  assert.deepEqual(run(5 * 60, { online: false }), [])
+  for (let i = 0; i < 10; i++) assert.equal(dog.fail({ ...s }), null)
+  assert.deepEqual(run(12, { online: true }), [])
+  const [retry] = run(1)
+  assert.equal(retry.attempt, 1)
+  assert.equal(retry.resumeAt, 73)
+})
+
 test("advanced(): moved on vs stopped at the end of the queue", () => {
   assert.equal(advanced({ playbackId: 3 }, { playbackId: 4, loadingRecommendations: false }), true)
   assert.equal(advanced({ playbackId: 3 }, { playbackId: 3, loadingRecommendations: true }), true)

@@ -54,6 +54,8 @@ function handle(request, reply) {
   // Las extracciones no responden nunca.
 }`))
   const run = createYtDlpRunner("/nonexistent-musica-ytdlp", { python: process.execPath, worker })
+  // La prueba mide el timeout de una petición, sin incluir el arranque del proceso.
+  assert.equal(await run(["--version"], 5_000), "stub-1")
   await assert.rejects(run(["--dump-single-json", "--", "https://www.youtube.com/watch?v=xxxxxxxxxxx"], 200), /tardado demasiado/)
   assert.equal(await run(["--version"], 5_000), "stub-1")
 })

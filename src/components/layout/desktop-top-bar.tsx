@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { AccountMenu } from "@/components/music/top-bar"
 import { TopSearch } from "@/components/music/top-search"
+import { useConnection } from "@/lib/offline/connection"
 import { cn } from "@/lib/utils"
 import { UpdateButton } from "./update-button"
 import { useDesktopApp, WindowControls } from "./window-controls"
@@ -18,6 +19,7 @@ import { useDesktopApp, WindowControls } from "./window-controls"
  * double click maximizes, and the caption buttons sit in the top-right corner.
  */
 export function DesktopTopBar() {
+  const offline = useConnection((s) => s.showDownloads)
   const router = useRouter()
   const pathname = usePathname()
   const home = pathname === "/"
@@ -48,7 +50,7 @@ export function DesktopTopBar() {
           <TooltipContent>Inicio</TooltipContent>
         </Tooltip>
         <Suspense>
-          <TopSearch className="w-full max-w-[480px]" />
+          {offline ? <span className="text-sm text-muted-foreground">Tu biblioteca</span> : <TopSearch className="w-full max-w-[480px]" />}
         </Suspense>
       </div>
       {app ? (

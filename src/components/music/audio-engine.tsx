@@ -8,10 +8,14 @@ import { notePause } from "@/lib/pause-log"
 import { useSettings } from "@/stores/settings"
 import { armWindow, fadeGains, isIOS, nextAutoTrack } from "@/lib/audio/transition"
 import { advanced, PlaybackWatchdog, type WatchdogAction } from "@/lib/audio/watchdog"
+import { playbackBuffer } from "@/lib/audio/playback-buffer"
+import { checkConnection, isOffline, useConnection } from "@/lib/offline/connection"
+import { offlineKey, useOffline } from "@/lib/offline/downloads"
 import { measureLoudness, trackGain, useGainKey } from "./normalization"
 import { useDevices } from "@/stores/devices"
 import { interruption } from "./interruption-controller"
 import { useListenTracker } from "./use-listen-tracker"
+import { useBrowseTracker } from "./use-browse-tracker"
 import type { Track } from "@/lib/types"
 
 /**
@@ -75,6 +79,11 @@ export function AudioEngine() {
   const index = usePlayer((s) => s.index)
   const upcoming = useMemo(() => upcomingTracks(queue, index, repeat), [queue, index, repeat])
   const provider = useProvider()
+  const offline = useConnection((s) => s.offline)
+  const bufferTracks = useMemo(() => {
+    const next = nextAutoTrack(queue, index, repeat)?.track
+    return track ? next && next.id !== track.id ? [track, next] : [track] : []
+  }, [track, queue, index, repeat])
   const mediaCover = useAuthenticatedArtwork(provider.coverUrl(track?.coverArt, 512))
   const [retry, setRetry] = useState(0)
   // A new playback or a watchdog retry starts unsettled again.
@@ -86,6 +95,8 @@ export function AudioEngine() {
   const refreshUrl = useRef(false)
   const watchdog = useRef(new PlaybackWatchdog())
   const resumeAt = useRef(0)
+  const waitingForConnection = useRef(false)
+  const advanceOnReconnect = useRef(false)
   const crossfade = useSettings((s) => s.crossfade)
   const gapless = useSettings((s) => s.gapless)
   const normalize = useSettings((s) => s.normalize)
@@ -95,6 +106,7 @@ export function AudioEngine() {
   const gainKey = useGainKey(track)
 
   useListenTracker()
+  useBrowseTracker()
   usePodcastSession()
 
   const otherDeck = () => (ref.current === decks.current[0] ? decks.current[1] : decks.current[0])
@@ -162,18 +174,21 @@ export function AudioEngine() {
   useEffect(() => {
     refreshUrl.current = false
     resumeAt.current = usePlayer.getState().position
+    waitingForConnection.current = false
+    advanceOnReconnect.current = false
   }, [track, provider, playbackId])
 
   /** Snapshot for the watchdog: one key per playback, position of the active deck. */
   const watchdogSample = () => {
     const s = usePlayer.getState(), t = s.queue[s.index]
-    return { now: performance.now(), key: `${s.playbackId}:${t?.id ?? ""}`, wantsPlaying: s.isPlaying && !s.loadingRecommendations, position: ref.current?.currentTime ?? 0, resolved: ready.current }
+    return { now: performance.now(), key: `${s.playbackId}:${t?.id ?? ""}`, wantsPlaying: s.isPlaying && !s.loadingRecommendations, position: ready.current ? ref.current?.currentTime ?? s.position : resumeAt.current || s.position, resolved: ready.current, online: !isOffline() }
   }
 
   /** Carry out a watchdog decision: reload the same song (resuming where it was) or move on with a quiet toast. */
   const recover = (action: WatchdogAction) => {
     if (!action) return
     if (action.type === "retry") {
+      waitingForConnection.current = false
       ready.current = false
       failed.current = false
       refreshUrl.current = action.refresh
@@ -195,15 +210,41 @@ export function AudioEngine() {
     toast(stuck ? `«${stuck.title}» no carga.` : "No se pudo cargar la canción.", { duration: 2500 })
   }
 
+  /** Use the complete temporary copy only when the remote deck needs it; healthy audio stays untouched. */
+  const resumeBufferedCopy = () => {
+    const s = usePlayer.getState(), t = s.queue[s.index]
+    const local = t && playbackBuffer.url(provider.offlineScope ?? "", t.id)
+    if (!local || !ref.current || ref.current.getAttribute("src") === local) return false
+    recover({ type: "retry", attempt: 0, refresh: false, resumeAt: watchdogSample().position })
+    return true
+  }
+
   // Watchdog: if the active deck does not really play for ~12 s while it should (stalled, or a throttled
   // stream trickling crumbs of audio), retry with a fresh URL where it stopped, and then skip.
   useEffect(() => {
     const timer = window.setInterval(() => {
       if (!ref.current || !usePlayer.getState().queue.length) return
+      const state = usePlayer.getState()
+      if (state.isPlaying && !state.loadingRecommendations && (waitingForConnection.current || state.buffering)) {
+        if (advanceOnReconnect.current) {
+          if (!isOffline()) {
+            waitingForConnection.current = false
+            advanceOnReconnect.current = false
+            void state.next(true)
+          }
+          return
+        }
+        if (resumeBufferedCopy()) return
+        if (waitingForConnection.current && !isOffline()) {
+          waitingForConnection.current = false
+          recover({ type: "retry", attempt: 0, refresh: true, resumeAt: watchdogSample().position })
+          return
+        }
+      }
       recover(watchdog.current.sample(watchdogSample()))
     }, 1000)
     return () => window.clearInterval(timer)
-  }, [])
+  }, [provider]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // load track
   useEffect(() => {
@@ -248,19 +289,30 @@ export function AudioEngine() {
         resumeAt.current = 0
         if (at > 0) {
           // Retry after a stall: continue where it stopped once the new source knows its length.
-          a.addEventListener("loadedmetadata", () => { if (!cancelled && ref.current === a) a.currentTime = Math.min(at, isFinite(a.duration) ? Math.max(0, a.duration - 1) : at) }, { once: true })
+          a.addEventListener("loadedmetadata", () => { if (!cancelled && ref.current === a) a.currentTime = Math.min(at, isFinite(a.duration) ? Math.max(0, a.duration) : at) }, { once: true })
           usePlayer.setState({ position: at })
         }
         if (usePlayer.getState().isPlaying) a.play().catch((error: DOMException) => {
           if (!cancelled && !["AbortError", "NotSupportedError"].includes(error.name)) {
+            if (isOffline() && error.name !== "NotAllowedError") {
+              waitingForConnection.current = true
+              usePlayer.setState({ buffering: true })
+              return
+            }
             usePlayer.getState().setPlaying(false)
             if (error.name === "NotAllowedError") toast("Pulsa Reproducir en este dispositivo para permitir el audio.")
           }
         })
         provider.scrobble?.(track.id, false).catch(() => {})
       })
-      .catch((e: Error) => {
+      .catch(async (e: Error) => {
+        if (!cancelled && !isOffline()) await checkConnection()
         if (cancelled) return
+        if (isOffline()) {
+          waitingForConnection.current = true
+          usePlayer.setState({ buffering: true })
+          return
+        }
         const state = usePlayer.getState()
         // Like a stuck stream: after the provider's own retries, move on instead of stopping the music.
         if (state.isPlaying && navigator.onLine !== false && skipped.current < 3 && nextAutoTrack(state.queue, state.index, state.repeat === "one" ? "off" : state.repeat)) {
@@ -289,7 +341,10 @@ export function AudioEngine() {
     if (loadingRecommendations) return
     if (isPlaying && failed.current) { failed.current = false; refreshUrl.current = true; setRetry((value) => value + 1); return }
     if (!ready.current) return
-    if (isPlaying && a.paused) a.play().catch(() => usePlayer.setState({ isPlaying: false }))
+    if (isPlaying && a.paused) a.play().catch(() => {
+      if (isOffline() || waitingForConnection.current) { waitingForConnection.current = true; return }
+      usePlayer.setState({ isPlaying: false })
+    })
     if (!isPlaying && !a.paused) a.pause()
     if (!isPlaying) finishFade()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -299,6 +354,25 @@ export function AudioEngine() {
     for (const d of decks.current) if (d) d.muted = muted
     if (ref.current && !fade.current) ref.current.volume = Math.min(1, outputVolume(volume) * trackGain(track))
   }, [volume, muted, track, gainKey])
+
+  // Keep just the current and next song. Fetch one at a time once the active stream has settled.
+  useEffect(() => {
+    playbackBuffer.retain(provider.offlineScope ?? "", bufferTracks.map((t) => t.id))
+  }, [provider, bufferTracks])
+  useEffect(() => {
+    if (offline || !settled || !isPlaying) { playbackBuffer.pause(); return }
+    if (!ready.current || provider.kind === "mock") return
+    let cancelled = false
+    void (async () => {
+      for (const t of bufferTracks) {
+        if (cancelled || isOffline()) return
+        if (useOffline.getState().items[offlineKey(provider.kind, t.id, provider.offlineScope ?? "")]) continue
+        await playbackBuffer.prepare(t, provider)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [provider, bufferTracks, settled, offline, isPlaying])
+  useEffect(() => () => playbackBuffer.clear(), [])
 
   // Preload the song that auto-advance will pick on the idle deck, shortly before the end.
   useEffect(() => {
@@ -423,12 +497,21 @@ export function AudioEngine() {
         if (armed.current && useSettings.getState().crossfade > 0) startCrossfade(a)
       }}
       onDurationChange={(e) => live(e.currentTarget) && isFinite(e.currentTarget.duration) && usePlayer.setState({ duration: e.currentTarget.duration })}
-      onWaiting={(e) => live(e.currentTarget) && usePlayer.setState({ buffering: true })}
-      onPlaying={(e) => live(e.currentTarget) && usePlayer.setState({ buffering: false, isPlaying: true })}
+      onWaiting={(e) => {
+        if (!live(e.currentTarget)) return
+        if (isOffline()) waitingForConnection.current = true
+        usePlayer.setState({ buffering: true })
+      }}
+      onPlaying={(e) => {
+        if (!live(e.currentTarget)) return
+        waitingForConnection.current = false
+        usePlayer.setState({ buffering: false, isPlaying: true })
+      }}
       onCanPlay={(e) => live(e.currentTarget) && usePlayer.setState({ buffering: false })}
       onPause={(e) => {
         if (!useDevices.getState().localPlayback) return
         if (!(live(e.currentTarget) && ready.current && e.currentTarget.paused && !e.currentTarget.ended)) return
+        if (e.currentTarget.error || waitingForConnection.current) return
         // The store still says "playing": the WebView paused the element itself (audio focus lost to a call, another app, the assistant…)
         if (usePlayer.getState().isPlaying) {
           notePause("focus", "el sistema pausó el audio (otra app, llamada o asistente)")
@@ -442,6 +525,12 @@ export function AudioEngine() {
         const state = usePlayer.getState()
         const t = state.current()
         if (t) getProvider().scrobble?.(t.id, true).catch(() => {})
+        if (isOffline() && !nextAutoTrack(state.queue, state.index, state.repeat) && t?.id.startsWith("yt:") && state.repeat === "off") {
+          waitingForConnection.current = true
+          advanceOnReconnect.current = true
+          usePlayer.setState({ buffering: true })
+          return
+        }
         // Gapless: the next song is already buffered on the idle deck, start it before React re-renders.
         const take = armed.current, upcoming = nextAutoTrack(state.queue, state.index, state.repeat)
         if (take && upcoming?.track.id === take.trackId) {
@@ -453,13 +542,23 @@ export function AudioEngine() {
         }
         void state.next(true)
       }}
-      onError={(e) => {
-        if (!live(e.currentTarget)) {
-          if (armed.current?.deck === e.currentTarget) armed.current = null
+      onError={async (e) => {
+        const element = e.currentTarget
+        if (!live(element)) {
+          if (armed.current?.deck === element) armed.current = null
           return
         }
-        if (!ready.current || !e.currentTarget.getAttribute("src")) return
+        if (!ready.current || !element.getAttribute("src")) return
         if (!usePlayer.getState().queue.length) return
+        if (resumeBufferedCopy()) return
+        const sample = watchdogSample(), src = element.getAttribute("src")
+        if (!isOffline()) await checkConnection()
+        if (!live(element) || !ready.current || sample.key !== watchdogSample().key || element.getAttribute("src") !== src) return
+        if (isOffline()) {
+          waitingForConnection.current = true
+          usePlayer.setState({ buffering: true })
+          return
+        }
         // Fresh URL (expired signature, dropped connection…) once or twice, then on to the next song.
         recover(watchdog.current.fail({ ...watchdogSample(), resolved: true }))
       }}

@@ -3,6 +3,9 @@
 import { usePathname, useRouter } from "next/navigation"
 import { Suspense, useEffect, useState, type ReactNode } from "react"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import DownloadsPage from "@/app/downloads/page"
+import { OfflineStatus } from "@/components/offline/offline-status"
+import { useConnection } from "@/lib/offline/connection"
 import { AudioEngine } from "@/components/music/audio-engine"
 import { DeviceSync } from "@/components/music/device-sync"
 import { useDevices } from "@/stores/devices"
@@ -29,6 +32,7 @@ function useHydrated() {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const hydrated = useHydrated()
+  const offline = useConnection((s) => s.showDownloads)
   const pathname = usePathname()
   const router = useRouter()
   const mode = useSession((s) => s.mode)
@@ -66,7 +70,11 @@ export function AppShell({ children }: { children: ReactNode }) {
         </Suspense>
         <main className="relative min-w-0 flex-1 overflow-hidden bg-(--surface) [--surface:var(--background)] md:rounded-2xl md:[--surface:var(--card)]">
           <ScrollArea className="h-full [&>[data-slot=scroll-area-viewport]]:overscroll-none [&>[data-slot=scroll-area-viewport]>div]:block!">
-            <div className={hasTrack ? "pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8" : "pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-8"}>{children}</div>
+            <div className={hasTrack ? "pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8" : "pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-8"}>
+              <OfflineStatus />
+              <div hidden={offline && !pathname.startsWith("/downloads")}>{children}</div>
+              {offline && !pathname.startsWith("/downloads") && <DownloadsPage />}
+            </div>
           </ScrollArea>
         </main>
         <NowPlayingPanel />

@@ -1,3 +1,4 @@
+import { findSameTrack } from "./track-identity.mjs"
 import { randomUUID } from "node:crypto"
 import { transaction } from "./db.mjs"
 import { MusicError } from "./errors.mjs"
@@ -145,7 +146,9 @@ export function createLibrary(db, { now = () => Date.now() } = {}) {
     addTrack(userId, id, track) {
       const { playlist } = lib.access(userId, id, "editor")
       const json = item(track, "tema")
-      if (db.prepare("SELECT 1 FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?").get(playlist.id, track.id)) return { added: false, playlist: lib.playlist(userId, id) }
+      // Idempotent by song, not only by id: the search result and the album track of one song can differ in id/source.
+      const existing = db.prepare("SELECT track_json FROM playlist_tracks WHERE playlist_id = ?").all(playlist.id).map((r) => parse(r.track_json)).filter(Boolean)
+      if (findSameTrack(existing, track)) return { added: false, playlist: lib.playlist(userId, id) }
       const next = db.prepare("SELECT COALESCE(MAX(position) + 1, 0) AS p FROM playlist_tracks WHERE playlist_id = ?").get(playlist.id).p
       db.prepare("INSERT INTO playlist_tracks (playlist_id, position, track_id, track_json, added_by, added_at) VALUES (?, ?, ?, ?, ?, ?)").run(playlist.id, next, track.id, json, userId, now())
       lib.touch(playlist.id)

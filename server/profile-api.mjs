@@ -1,4 +1,4 @@
-import { createAccounts, createLoginLimiter, SESSION_DAYS, validateProfileUpdate, verifyPassword } from "./accounts.mjs"
+import { createAccounts, createLoginLimiter, SESSION_DAYS, validateNewPassword, validateProfileUpdate, verifyPassword } from "./accounts.mjs"
 import { openDb } from "./db.mjs"
 import { MusicError } from "./errors.mjs"
 import { createLibrary } from "./library.mjs"
@@ -118,13 +118,11 @@ export async function createProfileApi({ db = openDb(":memory:"), seed = true, a
         admin()
         const view = (u) => ({ ...accounts.publicUser(u), active: !!u.active, lastSeen: u.last_seen ?? null, createdAt: u.created_at })
         if (path === "/api/admin/users" && method === "GET") return json(accounts.list().map(view)), true
-        if (path === "/api/admin/users" && method === "POST") { const { name, password, role } = await readJson(req, 2000); return json(await accounts.createUser({ username: name, password, role }), 201), true }
+        if (path === "/api/admin/users" && method === "POST") { const { name, password, role } = await readJson(req, 2000); validateNewPassword(password, name); return json(await accounts.createUser({ username: name, password, role }), 201), true }
         if (seg[1] === "users" && seg[2] && method === "PATCH") {
           const { active, role, password } = await readJson(req, 2000)
           validateProfileUpdate({ active, role })
-          if (!accounts.get(seg[2])) throw new MusicError("Perfil no encontrado.", 404)
-          if (password !== undefined) await accounts.setPassword(seg[2], password, { keepToken: seg[2] === user.id ? token(req) : undefined })
-          accounts.update(seg[2], { active, role }, user.id)
+          await accounts.editUser(seg[2], { active, role, password }, user.id, { keepToken: seg[2] === user.id ? token(req) : undefined })
           return json(view(accounts.list().find((u) => u.id === seg[2]))), true
         }
         throw new MusicError("Ruta no encontrada.", 404)

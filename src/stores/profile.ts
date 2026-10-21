@@ -45,7 +45,8 @@ export const useProfile = create<ProfileState>()(
       weakProfiles: [],
       check: async () => {
         const version = ++checkVersion
-        set({ status: "checking" })
+        // Revalidating a saved profile must not tear down its player and device session.
+        if (!get().user) set({ status: "checking" })
         try {
           const { user, weakProfiles } = await api<{ user: ProfileUser; weakProfiles?: string[] }>("/api/auth/me")
           if (version !== checkVersion) return
@@ -57,7 +58,7 @@ export const useProfile = create<ProfileState>()(
           if (status === 401) {
             if (get().user) clearProfileData()
             set({ user: null, status: "anon", weakProfiles: [] })
-          } else if ((status === 404 || status === 405) && !serverBase()) set({ status: "unavailable" })
+          } else if ((status === 404 || status === 405) && !serverBase() && !get().user) set({ status: "unavailable" })
           else set({ status: get().user ? "offline" : "error" })
         }
       },

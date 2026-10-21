@@ -20,6 +20,7 @@ import { useRecentAlbums } from "@/stores/history"
 import { ContinueListening, FollowedPodcasts } from "@/components/podcast/home-podcasts"
 import { TopPodcasts } from "@/components/podcast/top-podcasts"
 import { usePodcastsEnabled } from "@/components/podcast/podcast-playback"
+import { HomeListening } from "@/components/music/home-listening"
 
 function QuickTile({ href, title, art, onPlay }: { href: string; title: string; art: React.ReactNode; onPlay?: () => void }) {
   return (
@@ -93,6 +94,7 @@ export default function HomePage() {
           </section>
         )}
 
+        {filter === "all" && <HomeListening playlists={data?.playlists} />}
         {(filter === "all" || filter === "podcasts") && <ContinueListening />}
         {filter === "podcasts" && <FollowedPodcasts />}
         {filter === "podcasts" && <TopPodcasts />}

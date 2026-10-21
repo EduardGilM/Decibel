@@ -8,7 +8,6 @@ import { GlassGroup, GlassRow } from "@/components/ui/glass-list"
 import { isIOS } from "@/lib/audio/transition"
 import { useSettings } from "@/stores/settings"
 import { formatBytes, LIMIT_OPTIONS_MB, useOffline, usedBytes } from "@/lib/offline/downloads"
-import { useSession } from "@/stores/session"
 import { cn } from "@/lib/utils"
 import { NotificationSettingRow } from "./native-media-bridge"
 
@@ -43,7 +42,6 @@ function Pills<T extends string | number>({ value, options, onChange, label, for
 export function PlaybackSettings({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const { crossfade, gapless, normalize, setCrossfade, setGapless, setNormalize } = useSettings()
   const ios = useIsIOS()
-  const youtube = useSession((s) => s.mode === "ytdlp")
   const limitMB = useOffline((s) => s.limitMB)
   const setLimit = useOffline((s) => s.setLimit)
   const used = useOffline((s) => usedBytes(s.items))
@@ -70,7 +68,7 @@ export function PlaybackSettings({ open, onOpenChange }: { open: boolean; onOpen
               </div>
             )}
           </GlassGroup>
-          {!youtube && (
+          {(
             <GlassGroup>
               <div>
                 <GlassRow icon={<HardDriveDownload />} label="Espacio para descargas">

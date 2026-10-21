@@ -1,9 +1,10 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
 import { toast } from "sonner"
 import { api, ApiError, serverBase } from "@/lib/profile/api"
 import { configurePlaybackRouter, playbackSnapshot, type DeviceSession, type PlaybackDevice, type PlaybackSnapshot } from "@/lib/audio/device-protocol"
+import { isOffline, useConnection } from "@/lib/offline/connection"
 import { useDevices } from "@/stores/devices"
 import { usePlayer } from "@/stores/player"
 import { useProfile } from "@/stores/profile"
@@ -33,18 +34,23 @@ function identity(): PlaybackDevice {
 /** One transport per signed-in profile. The existing player remains the source of local playback. */
 export function DeviceSync() {
   useKeyboardShortcuts()
+  const offline = useConnection((s) => s.offline)
   const userId = useProfile((s) => s.user?.id)
   const status = useProfile((s) => s.status)
   const mode = useSession((s) => s.mode)
   const musicUrl = useSession((s) => s.ytdlpUrl)
+  const reconnect = useRef<{ userId: string; musicUrl: string; device: PlaybackDevice; epoch: number; ack: number } | null>(null)
 
   useEffect(() => {
-    if (!userId || status !== "ready" || mode !== "ytdlp") return
+    if (offline || !userId || status !== "ready" || mode !== "ytdlp") return
     // A different music source cannot resolve the same queue on another device.
     if (musicUrl && new URL(musicUrl, location.origin).origin !== new URL(serverBase() || location.origin, location.origin).origin) return
-    const device = identity()
+    const previous = reconnect.current?.userId === userId && reconnect.current.musicUrl === musicUrl ? reconnect.current : null
+    reconnect.current = null
+    const device = previous?.device ?? identity()
     const abort = new AbortController()
-    let disposed = false, applying = false, epoch = -1, ack = 0, initialized = false, polling = false
+    let disposed = false, applying = false, epoch = previous?.epoch ?? -1, ack = previous?.ack ?? 0, initialized = false, polling = false
+    let reclaim = !!previous
     // The other device picked in Dispositivos from here: only then do this device's controls drive it.
     let chosen: string | null = null
     let stoppedState: PlaybackSnapshot | undefined
@@ -83,11 +89,9 @@ export function DeviceSync() {
         }
         stoppedState = undefined
         useDevices.setState({ localPlayback: true })
-        // Stop before the server can hand the output to a different device after connection loss.
+        // A lost heartbeat switches to independent local playback; buffered audio needs no server.
         lease = setTimeout(() => {
-          silence()
-          usePlayer.setState({ isPlaying: false, buffering: false })
-          useDevices.setState({ connected: false, error: "Sin conexión." })
+          useConnection.setState({ offline: true })
         }, response.leaseMs - 1000 - (Date.now() - sent))
         applying = true
         try {
@@ -116,6 +120,10 @@ export function DeviceSync() {
         useDevices.setState(useDevices.getInitialState(), true)
         return
       }
+      if (error instanceof ApiError && (error.status === 0 || error.status >= 500)) {
+        useConnection.setState({ offline: true })
+        return
+      }
       const message = error instanceof Error ? error.message : "Sin conexión."
       useDevices.setState({ connected: false, error: message })
       if (error instanceof ApiError && error.status === 401) {
@@ -131,11 +139,21 @@ export function DeviceSync() {
         await enqueue(async () => {
           const sent = Date.now()
           const local = useDevices.getState().localPlayback
-          receive(await request("heartbeat", {
+          let response = await request("heartbeat", {
             ack,
             stopped: !local && (usePlayer.getState().audio?.paused ?? true),
             state: local ? playbackSnapshot(usePlayer.getState()) : stoppedState,
-          }), sent)
+          })
+          if (reclaim) {
+            reclaim = false
+            // Keep offline progress when the same output returns. Respect an output selected elsewhere.
+            if (!response.activeId && !response.pendingId) {
+              epoch = response.epoch
+              response = await request("transfer", { target: device.id, state: playbackSnapshot(usePlayer.getState()) })
+            }
+            if (response.activeId === device.id && !response.pendingId) epoch = response.epoch
+          }
+          receive(response, sent)
         })
       } catch (error) { failure(error) }
       polling = false
@@ -218,10 +236,14 @@ export function DeviceSync() {
       clearTimeout(lease)
       document.removeEventListener("visibilitychange", wake)
       configurePlaybackRouter(null)
-      usePlayer.getState().audio?.pause()
-      usePlayer.setState({ isPlaying: false })
+      // Keep the same device and position when local playback reconnects.
+      if (isOffline() && useDevices.getState().localPlayback) reconnect.current = { userId, musicUrl, device, epoch, ack }
+      if (!isOffline() || !useDevices.getState().localPlayback) {
+        usePlayer.getState().audio?.pause()
+        usePlayer.setState({ isPlaying: false })
+      }
       useDevices.setState(useDevices.getInitialState(), true)
     }
-  }, [userId, status, mode, musicUrl])
+  }, [userId, status, mode, musicUrl, offline])
   return null
 }

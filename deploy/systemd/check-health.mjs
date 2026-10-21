@@ -31,11 +31,11 @@ do {
     assert.equal(podcastPreflight.headers.get("access-control-allow-origin"), "https://tauri.localhost")
     assert.match(podcastPreflight.headers.get("access-control-allow-headers"), /\bRange\b/)
     assert.match(podcastPreflight.headers.get("access-control-expose-headers"), /Content-Range/)
-    assert.equal((await fetch(base + "/api/music/health", {
+    assert.equal((await fetch(base + "/api/music/stream?id=invalid", {
       headers: { "X-Decibel-Purpose": "download" }, signal: AbortSignal.timeout(4000),
-    })).status, 403)
+    })).status, 401)
     assert.equal((await fetch(base + "/", { signal: AbortSignal.timeout(4000) })).status, 200)
-    console.log("Web app, profiles, yt-dlp and catalogue are up; session, CORS and download blocking verified.")
+    console.log("Web app, profiles, yt-dlp and catalogue are up; session, CORS and authenticated audio verified.")
     process.exit(0)
   } catch (caught) { error = caught }
   await new Promise((resolve) => setTimeout(resolve, 500))

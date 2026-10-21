@@ -16,8 +16,9 @@ import { createRequestSecurity } from "./request-security.mjs"
 import { createDevices } from "./devices.mjs"
 import { createSpotifyImport } from "./spotify.mjs"
 import { profileCollections } from "./profile-collections.mjs"
+import { sendMusicStream } from "./music-stream.mjs"
 
-export async function createApp({ music, publicDir, allowedOrigins = [], artwork = createArtworkService(), profiles, podcasts = profiles ? createPodcastService({ db: profiles.db }) : undefined, releases = createReleases({ dir: undefined }), spotify = profiles ? createSpotifyImport({ db: profiles.db, library: profiles.library, search: (query) => music.search(query, "tracks"), allowedOrigins }) : undefined, trustProxy, now = Date.now }) {
+export async function createApp({ music, publicDir, allowedOrigins = [], streamRequest, artwork = createArtworkService(), profiles, podcasts = profiles ? createPodcastService({ db: profiles.db }) : undefined, releases = createReleases({ dir: undefined }), spotify = profiles ? createSpotifyImport({ db: profiles.db, library: profiles.library, search: (query) => music.search(query, "tracks"), allowedOrigins }) : undefined, trustProxy, now = Date.now }) {
   const security = createRequestSecurity({ trustProxy })
   const devices = createDevices()
   let healthCache
@@ -67,9 +68,8 @@ export async function createApp({ music, publicDir, allowedOrigins = [], artwork
       if (await devices.handle(req, url, json, user)) return
       if (await handlePodcastApi(req, res, url, json, user, podcasts)) return
       if (!url.pathname.startsWith("/api/music/")) throw new MusicError("Ruta no encontrada.", 404)
-      // YouTube audio is streamed only; offline copies are refused here as well as in the client.
-      if (req.headers["x-decibel-purpose"] === "download") throw new MusicError("Las descargas sin conexión no están disponibles para YouTube.", 403)
       const route = url.pathname.slice("/api/music/".length)
+      if (["GET", "HEAD"].includes(req.method) && route === "stream") return await sendMusicStream(req, res, url.searchParams.get("id"), { music, request: streamRequest })
       const body = async () => {
         if (!req.headers["content-type"]?.startsWith("application/json")) throw new MusicError("Se requiere JSON.", 415)
         let contents = ""

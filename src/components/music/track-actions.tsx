@@ -3,18 +3,28 @@
 import Link from "next/link"
 import { useState, type MouseEvent } from "react"
 import { createPortal } from "react-dom"
-import { Disc3, ListEnd, ListMinus, ListPlus, MoreHorizontal, User } from "lucide-react"
+import { ArrowDownCircle, Check, Disc3, ListEnd, ListMinus, ListPlus, MoreHorizontal, User } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import type { Track } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { canDownload, download, offlineKey, removeDownloads, useOffline } from "@/lib/offline/downloads"
+import { useOfflineScope } from "@/lib/offline/context"
+import { useConnection } from "@/lib/offline/connection"
+import { getProvider, useProvider } from "@/lib/providers"
 import { usePlayer } from "@/stores/player"
 import { hrefAlbum, hrefArtist } from "./media-card"
 import { addToQueueWithFeedback, removeFromQueueWithFeedback, upcomingIndex } from "./swipe-to-queue"
 
 /** The song menu, shared by the «…» button and the right click on a row. */
 function TrackMenuItems({ track }: { track: Track }) {
+  const provider = useProvider()
+  const scope = useOfflineScope()
+  const key = offlineKey(provider.kind, track.id, scope)
+  const saved = useOffline((s) => !!s.items[key])
+  const busy = useOffline((s) => !!s.pending[key])
+  const offline = useConnection((s) => s.offline)
   const queued = usePlayer((s) => s.queue.some((t, i) => i !== s.index && t.id === track.id))
   return (
     <>
@@ -34,6 +44,21 @@ function TrackMenuItems({ track }: { track: Track }) {
           <ListMinus /> Quitar de la cola
         </DropdownMenuItem>
       )}
+      {canDownload(provider.kind, track) && <>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem disabled={busy || (offline && !saved)} onSelect={() => {
+          void (async () => {
+            try {
+              if (saved) { await removeDownloads([key]); toast("Descarga eliminada") }
+              else {
+                const result = await download([track], getProvider())
+                if (result.failed.length) toast.error(result.failed[0])
+                else toast("Descargada para escuchar sin conexión")
+              }
+            } catch (error) { toast.error(error instanceof Error ? error.message : "No se pudo descargar.") }
+          })()
+        }}>{saved ? <Check /> : <ArrowDownCircle />}{saved ? "Quitar descarga" : busy ? "Descargando…" : "Descargar"}</DropdownMenuItem>
+      </>}
       {(track.albumId || track.artistId) && <DropdownMenuSeparator />}
       {track.albumId && (
         <DropdownMenuItem asChild>

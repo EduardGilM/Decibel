@@ -37,6 +37,8 @@ export interface WatchdogSample {
   position: number
   /** The stream URL is on the element (false while it is still being resolved). */
   resolved: boolean
+  /** Offline waits preserve both the song and the retry budget. */
+  online?: boolean
 }
 
 export class PlaybackWatchdog {
@@ -86,7 +88,7 @@ export class PlaybackWatchdog {
       this.restart(s)
       return null
     }
-    if (!s.wantsPlaying) {
+    if (!s.wantsPlaying || s.online === false) {
       this.wasPlaying = false
       this.restart(s)
       return null
@@ -122,7 +124,8 @@ export class PlaybackWatchdog {
   }
 
   /** The media element reported an error for the current playback: retry or skip right away. */
-  fail(s: WatchdogSample): Exclude<WatchdogAction, null> {
+  fail(s: WatchdogSample): WatchdogAction {
+    if (s.online === false) { this.sample(s); return null }
     if (s.key !== this.key) {
       this.key = s.key
       this.attempts = 0

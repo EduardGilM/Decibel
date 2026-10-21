@@ -13,6 +13,9 @@ import { ProfileAvatar } from "./profile-avatar"
 
 type Access = "none" | "viewer" | "editor"
 
+/** One segment of the pill control (filter-chip look: the selected segment is filled with the accent). */
+const SEGMENT = "h-7 rounded-full! border-0 bg-transparent px-3 text-xs font-medium text-foreground shadow-none hover:bg-foreground/10 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground data-[state=on]:hover:bg-primary/90"
+
 /** Owner-only: invite profiles as reader/editor or open the list to everyone (collaborative). */
 export function ShareDialog({ playlist, open, onOpenChange, onChange }: { playlist: ProfilePlaylist; open: boolean; onOpenChange: (v: boolean) => void; onChange: (p: ProfilePlaylist) => void }) {
   const [profiles, setProfiles] = useState<PublicProfile[]>([])
@@ -29,25 +32,21 @@ export function ShareDialog({ playlist, open, onOpenChange, onChange }: { playli
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Compartir «{playlist.name}»</DialogTitle>
-          <DialogDescription>Quien pueda editar podrá añadir, quitar y ordenar canciones. Verás quién añadió cada una.</DialogDescription>
+          <DialogTitle className="truncate pr-6 text-base">Compartir «{playlist.name}»</DialogTitle>
+          <DialogDescription className="sr-only">Elige quién puede ver o editar esta lista.</DialogDescription>
         </DialogHeader>
-        <div className="flex items-start justify-between gap-4 rounded-xl bg-white/[0.04] px-4 py-3">
-          <div>
-            <Label htmlFor="collaborative" className="text-sm font-medium">Colaborativa</Label>
-            <p className="mt-1 text-xs text-muted-foreground">Todos los perfiles de este servidor pueden verla y añadir canciones.</p>
-          </div>
+        <div className="flex items-center justify-between gap-4 rounded-xl bg-white/[0.04] px-4 py-2.5">
+          <Label htmlFor="collaborative" className="text-sm font-medium">Colaborativa</Label>
           <Switch id="collaborative" checked={playlist.collaborative} disabled={busy} onCheckedChange={(v) => run(playlistActions.setCollaborative(playlist.id, v), v ? "Lista colaborativa" : "Ya no es colaborativa")} />
         </div>
         <ul className="flex flex-col gap-1">
           {profiles.filter((p) => p.id !== playlist.ownerId).map((p) => (
             <li key={p.id} className="flex items-center gap-3 py-1.5">
-              <ProfileAvatar name={p.name} color={p.color} className="size-9 text-sm" />
+              <ProfileAvatar name={p.name} color={p.color} own className="size-9 text-sm" />
               <span className="min-w-0 flex-1 truncate text-sm font-medium">{p.name}</span>
               <ToggleGroup
                 type="single"
-                size="sm"
-                variant="outline"
+                className="shrink-0 rounded-full bg-foreground/10 p-0.5"
                 value={playlist.collaborative && access(p.id) === "none" ? "editor" : access(p.id)}
                 disabled={busy || playlist.collaborative}
                 onValueChange={(v) => {
@@ -56,9 +55,9 @@ export function ShareDialog({ playlist, open, onOpenChange, onChange }: { playli
                 }}
                 aria-label={`Acceso de ${p.name}`}
               >
-                <ToggleGroupItem value="none" className="px-2.5 text-xs data-[state=on]:border-white data-[state=on]:bg-white data-[state=on]:text-black">No</ToggleGroupItem>
-                <ToggleGroupItem value="viewer" className="px-2.5 text-xs data-[state=on]:border-white data-[state=on]:bg-white data-[state=on]:text-black">Ver</ToggleGroupItem>
-                <ToggleGroupItem value="editor" className="px-2.5 text-xs data-[state=on]:border-white data-[state=on]:bg-white data-[state=on]:text-black">Editar</ToggleGroupItem>
+                <ToggleGroupItem value="none" className={SEGMENT}>No</ToggleGroupItem>
+                <ToggleGroupItem value="viewer" className={SEGMENT}>Ver</ToggleGroupItem>
+                <ToggleGroupItem value="editor" className={SEGMENT}>Editar</ToggleGroupItem>
               </ToggleGroup>
             </li>
           ))}

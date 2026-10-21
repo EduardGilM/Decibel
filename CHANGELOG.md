@@ -2,6 +2,38 @@
 
 All notable changes to Decibel. Versions follow the app version in `src-tauri/tauri.conf.json`.
 
+## 0.1.36
+
+Covers 0.1.26 to 0.1.36. Source preparation; no new app installers are published by this change.
+
+### Added
+- Optional device-local music downloads, storage limits, cancellation, offline artwork and playback.
+  Downloads are scoped to their source, server and profile; podcast episodes remain streamed.
+- A restricted, authenticated audio relay for buffering and downloads, plus temporary in-memory preparation
+  of the current/next song and playback recovery after network interruptions.
+- Recent visits, continue listening, loading placeholders, keyboard shortcuts and faster cached browsing.
+- Expanding artwork, progressive lyrics, animated panels and a gesture to open the profile menu.
+
+### Changed
+- Compact sharing controls, profile colours, track-row highlighting and album/playlist header tints.
+- Minimal downloads and playlist-link import dialogs, with a full-width import action.
+- The search interface no longer saves search queries or shows recent-query chips.
+- Desktop updates use raw current-format installers; legacy compressed Tauri v1 update handling is disabled.
+- Remove unused generation/server CLIs and update the PostCSS dependency used by the build.
+
+### Fixed
+- Canonical song identity prevents duplicates across search and album results and keeps saved indicators in sync.
+- Lyrics previews keep the active line at the top; player expansion and mobile header colours are smoother.
+- Brief server interruptions preserve the current page, navigation, artwork and colours. The downloads
+  fallback appears only after two continuous minutes without the server; reconnection restores the page.
+- Cached catalogue/profile answers bridge network failures without overriding authentication or permission errors.
+- Retain proxy trust validation, strict CORS, bounded login admission, safe administrator bootstrap and
+  administrative validation when integrating the new audio relay.
+- A rejected combined administrator edit no longer changes a password or revokes sessions before failing.
+- New profiles, configured bootstrap credentials and password resets require a passphrase of at least
+  15 characters; existing logins remain compatible.
+- Update the native TLS dependency resolutions to reject distrusted certificate chains.
+
 ## 0.1.25
 
 Covers 0.1.21 to 0.1.25.

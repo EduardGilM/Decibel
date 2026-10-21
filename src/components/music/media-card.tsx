@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { Play } from "lucide-react"
-import type { ReactNode } from "react"
+import type { CSSProperties, ReactNode } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { getProvider } from "@/lib/providers"
@@ -22,7 +22,7 @@ function QuickPlay({ load, label, className }: { load: () => Promise<Track[]>; l
       size="icon"
       aria-label={`Reproducir ${label}`}
       className={cn(
-        "absolute right-2 bottom-2 size-11 rounded-full opacity-0 transition-opacity duration-150 group-hover/media:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:hidden [&_svg]:size-5",
+        "absolute right-2 bottom-2 size-11 rounded-full opacity-0 transition-all duration-200 scale-90 group-hover/media:opacity-100 group-hover/media:scale-100 focus-visible:opacity-100 focus-visible:scale-100 [@media(hover:none)]:hidden [&_svg]:size-5",
         className,
       )}
       onClick={async (e) => {
@@ -37,11 +37,13 @@ function QuickPlay({ load, label, className }: { load: () => Promise<Track[]>; l
   )
 }
 
-function MediaCardBase({ href, title, subtitle, art, play, className }: { href: string; title: string; subtitle: ReactNode; art: ReactNode; play?: ReactNode; className?: string }) {
+type CardAppearance = { className?: string; style?: CSSProperties }
+
+function MediaCardBase({ href, title, subtitle, art, play, className, style }: { href: string; title: string; subtitle: ReactNode; art: ReactNode; play?: ReactNode } & CardAppearance) {
   return (
-    <Card className={cn("group/media gap-0 rounded-xl bg-transparent p-2 py-2 ring-0 transition-colors duration-150 hover:bg-muted/60 active:bg-muted", className)}>
+    <Card style={style} className={cn("group/media gap-0 rounded-xl bg-transparent p-2 py-2 ring-0 transition-all duration-200 hover:bg-muted/60 hover:scale-[1.02] active:bg-muted active:scale-[0.98] animate-fade-in", className)}>
       <Link href={href} className="flex flex-col gap-2 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring">
-        <div className="relative">
+        <div className="relative overflow-hidden rounded-lg">
           {art}
           {play}
         </div>
@@ -54,10 +56,11 @@ function MediaCardBase({ href, title, subtitle, art, play, className }: { href: 
   )
 }
 
-export function AlbumCard({ album, className }: { album: Album; className?: string }) {
+export function AlbumCard({ album, className, style }: { album: Album } & CardAppearance) {
   return (
     <MediaCardBase
       className={className}
+      style={style}
       href={hrefAlbum(album.id)}
       title={album.name}
       subtitle={[album.year, album.artist].filter(Boolean).join(" · ")}
@@ -67,10 +70,11 @@ export function AlbumCard({ album, className }: { album: Album; className?: stri
   )
 }
 
-export function PlaylistCard({ playlist, className }: { playlist: Playlist; className?: string }) {
+export function PlaylistCard({ playlist, className, style }: { playlist: Playlist } & CardAppearance) {
   return (
     <MediaCardBase
       className={className}
+      style={style}
       href={hrefPlaylist(playlist.id)}
       title={playlist.name}
       subtitle={playlist.comment || `${playlist.songCount} canciones`}
@@ -80,10 +84,11 @@ export function PlaylistCard({ playlist, className }: { playlist: Playlist; clas
   )
 }
 
-export function ArtistCard({ artist, className }: { artist: Artist; className?: string }) {
+export function ArtistCard({ artist, className, style }: { artist: Artist } & CardAppearance) {
   return (
     <MediaCardBase
       className={className}
+      style={style}
       href={hrefArtist(artist.id)}
       title={artist.name}
       subtitle="Artista"

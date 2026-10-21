@@ -1,7 +1,7 @@
 "use client"
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { Loader2, Play, Search, X } from "lucide-react"
+import { Play, Search, X } from "lucide-react"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { usePrepareTrack } from "@/hooks/use-prepare-track"
@@ -19,6 +19,8 @@ import { Cover } from "./cover"
 import { SwipeToQueue } from "./swipe-to-queue"
 import { TrackSaveButtons } from "./track-save-buttons"
 import { glass } from "@/components/ui/popover"
+import { Skeleton } from "@/components/ui/skeleton"
+import { dataCache, dataKey, SEARCH_CACHE_MS } from "@/lib/data-cache"
 
 const EMPTY_TRACKS: Track[] = []
 const searchText = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
@@ -80,15 +82,16 @@ export function TopSearch({ mobile = false, className, placeholder = "¿Qué qui
   useEffect(() => {
     if (!open || !query) return
     let alive = true
-    const controller = new AbortController()
     setPreview({ key })
+    const cacheKey = dataKey(scope, `search:tracks:${query}`)
     const timer = setTimeout(() => {
-      provider.search(query, controller.signal, "tracks")
+      // Shared requests outlive the dropdown so Enter can reuse the pending result.
+      dataCache.load(cacheKey, () => provider.search(query, undefined, "tracks"), SEARCH_CACHE_MS)
         .then((result) => { if (alive) setPreview({ key, tracks: result.tracks.slice(0, 6) }) })
         .catch(() => { if (alive) setPreview({ key, error: "No se pudieron cargar las sugerencias." }) })
-    }, 300)
-    return () => { alive = false; clearTimeout(timer); controller.abort() }
-  }, [open, query, key, provider, retry])
+    }, dataCache.peek(cacheKey) ? 0 : 300)
+    return () => { alive = false; clearTimeout(timer) }
+  }, [open, query, key, scope, provider, retry])
 
   // Follow the input while the portaled panel is open (scroll, resize, layout shifts).
   useEffect(() => {
@@ -134,7 +137,7 @@ export function TopSearch({ mobile = false, className, placeholder = "¿Qué qui
       if (el && el.offsetParent !== null) {
         el.focus()
         el.select()
-      } else {
+      } else if (!Array.from(document.querySelectorAll<HTMLInputElement>("[data-search-input]")).some((input) => input.offsetParent !== null)) {
         useSearch.getState().setRefocus(true)
         router.push("/search/?focus=1")
       }
@@ -150,11 +153,11 @@ export function TopSearch({ mobile = false, className, placeholder = "¿Qué qui
   }
 
   // keeps the tab you are on (also Podcasts, which shows the charts while the search is empty)
-  function submit(type: SearchFilter | "podcasts" = params.get("type") === "albums" ? "albums" : params.get("type") === "tracks" ? "tracks" : params.get("type") === "artists" ? "artists" : params.get("type") === "podcasts" ? "podcasts" : "all") {
+  function submit(type: SearchFilter | "podcasts" = params.get("type") === "albums" ? "albums" : params.get("type") === "tracks" ? "tracks" : params.get("type") === "artists" ? "artists" : params.get("type") === "podcasts" ? "podcasts" : "all", value = q) {
     setOpen(false)
     setActive(-1)
     ref.current?.blur()
-    router.push(searchHref(q, type), { scroll: false })
+    router.push(searchHref(value, type), { scroll: false })
   }
 
   function select(track: Track) {
@@ -173,7 +176,8 @@ export function TopSearch({ mobile = false, className, placeholder = "¿Qué qui
         <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground md:left-3.5 md:size-5" />
         <Input
           ref={ref}
-          id="search-input"
+          id={`${listId}-input`}
+          data-search-input
           type="search"
           value={q}
           onChange={(e) => change(e.target.value)}
@@ -217,7 +221,7 @@ export function TopSearch({ mobile = false, className, placeholder = "¿Qué qui
               {!query && tracks.length > 0 && <button type="button" className="text-xs text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" onMouseDown={(event) => event.preventDefault()} onClick={() => { useSearch.getState().clearRecent(scope); setActive(-1); ref.current?.focus() }}>Borrar todo</button>}
             </div>
             <div id={listId} role="listbox" aria-label={query ? "Canciones sugeridas" : "Búsquedas recientes"} aria-busy={loading} className="max-h-[min(28rem,calc(100dvh-12rem))] overflow-y-auto overscroll-contain px-2 pb-2">
-              {loading && <p role="status" className="flex items-center gap-2 px-2 py-5 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" /> Buscando canciones…</p>}
+              {loading && <div role="status" aria-label="Buscando canciones" className="py-2"><span className="sr-only">Buscando canciones…</span>{Array.from({ length: 3 }, (_, i) => <div key={i} aria-hidden className="flex items-center gap-3 p-2"><Skeleton className="size-12 shrink-0" /><div className="flex flex-1 flex-col gap-2"><Skeleton className="h-4 w-3/4" /><Skeleton className="h-3 w-1/2" /></div></div>)}</div>}
               {current?.error && query && (
                 <div role="status" className="px-2 py-3 text-sm text-muted-foreground">
                   <p>{current.error}</p>

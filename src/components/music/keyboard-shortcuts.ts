@@ -6,6 +6,7 @@ import { toast } from "sonner"
 import { getProvider } from "@/lib/providers"
 import { useLikes, usePlayer } from "@/stores/player"
 import { useUi } from "@/stores/ui"
+import { shortcutKey } from "@/lib/keyboard-shortcuts"
 
 /** Single source of truth for the help panel and the handler below. */
 export const SHORTCUT_GROUPS: { title: string; items: [string[], string][] }[] = [
@@ -49,29 +50,26 @@ async function toggleLikeCurrent() {
 }
 
 const isTyping = (target: EventTarget | null) =>
-  target instanceof HTMLElement && !!target.closest("input, textarea, select, [contenteditable=true], [role=slider], [role=menu], [role=listbox], [role=combobox]")
+  target instanceof Element && ((target instanceof HTMLElement && target.isContentEditable) || !!target.closest("input, textarea, select, [contenteditable]:not([contenteditable=false]), [role=textbox], [role=slider], [role=menu], [role=listbox], [role=combobox]"))
 
 /** Global keyboard shortcuts (desktop + hardware keyboards on tablets). */
 export function useKeyboardShortcuts() {
   const router = useRouter()
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || isTyping(e.target)) return
+      const nativeSpace = e.target instanceof Element && !!e.target.closest("button, a, [role=button], [role=tab]")
+      const key = shortcutKey(e, isTyping(e.target), nativeSpace)
+      if (!key) return
       const p = usePlayer.getState()
       const a = p.audio
-      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key
-      const plain = !e.ctrlKey && !e.metaKey && !e.altKey
-      if ((key === "k" && (e.ctrlKey || e.metaKey)) || (key === "/" && plain)) {
+      if (key === "focus-search" || key === "/") {
         e.preventDefault()
         window.dispatchEvent(new CustomEvent("decibel:focus-search"))
         return
       }
-      if (!plain && !(e.shiftKey && (key === "ArrowRight" || key === "ArrowLeft"))) return
-      // Space on a focused button should press the button, not toggle playback twice.
-      if (e.code === "Space" && e.target instanceof HTMLElement && e.target.closest("button, a, [role=button], [role=tab]")) return
       const duration = a?.duration && isFinite(a.duration) ? a.duration : p.duration
       switch (true) {
-        case e.code === "Space": e.preventDefault(); p.toggle(); break
+        case key === "Space": e.preventDefault(); p.toggle(); break
         case key === "ArrowRight" && e.shiftKey: e.preventDefault(); void p.next(); break
         case key === "ArrowLeft" && e.shiftKey: e.preventDefault(); p.prev(); break
         case key === "ArrowRight": if (p.queue.length) { e.preventDefault(); p.seek(Math.min(duration || Infinity, (a?.currentTime ?? p.position) + 5)) } break

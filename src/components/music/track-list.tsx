@@ -20,7 +20,11 @@ import { SwipeToQueue } from "./swipe-to-queue"
 import { ArtistLinks } from "./artist-links"
 
 /** `subline`: extra text after the artist (e.g. "añadida por"); `trailing`: per-row control before the menu. */
-export function TrackList({ tracks, label, showCover = true, showAlbum = true, numbered = true, singleTrack = false, subline, trailing }: { tracks: Track[]; label: string; showCover?: boolean; showAlbum?: boolean; numbered?: boolean; singleTrack?: boolean; subline?: (track: Track, index: number) => ReactNode; trailing?: (track: Track, index: number) => ReactNode }) {
+/** Row highlight painted by the cells (rounded like the queue rows): hover, open «…» menu and playing row. */
+const ROW_CELL = "transition-colors group-hover/row:bg-muted/60 group-has-aria-expanded/row:bg-transparent"
+const ROW_ACTIVE = "bg-muted group-hover/row:bg-muted group-has-aria-expanded/row:bg-muted"
+
+export function TrackList({ tracks, label, showCover = true, showAlbum = true, numbered = true, albumNumbers = false, singleTrack = false, subline, trailing }: { tracks: Track[]; label: string; showCover?: boolean; showAlbum?: boolean; numbered?: boolean; /** album pages: the album's track number; everywhere else the list position */ albumNumbers?: boolean; singleTrack?: boolean; subline?: (track: Track, index: number) => ReactNode; trailing?: (track: Track, index: number) => ReactNode }) {
   const currentId = usePlayer((s) => s.queue[s.index]?.id)
   const isPlaying = usePlayer((s) => s.isPlaying)
   const sourceLabel = usePlayer((s) => s.sourceLabel)
@@ -36,6 +40,7 @@ export function TrackList({ tracks, label, showCover = true, showAlbum = true, n
   return (
     <>
     {contextMenu.menu}
+    <div className="px-1">
     <Table className="table-fixed">
       <TableHeader className="hidden md:table-header-group">
         <TableRow className="text-muted-foreground hover:bg-transparent">
@@ -57,7 +62,9 @@ export function TrackList({ tracks, label, showCover = true, showAlbum = true, n
               key={`${t.id}-${i}`}
               data-state={active ? "selected" : undefined}
               // No highlight while its «…» menu is open (TableRow's has-aria-expanded) — only the playing row stays marked.
-              className={cn("cursor-pointer border-0 hover:bg-muted/60 has-aria-expanded:bg-transparent", active && "bg-muted hover:bg-muted has-aria-expanded:bg-muted")}
+              // A <tr> cannot round its background, so the cells paint it (ROW_CELL) and the outer visible cells round it.
+              className={cn("group/row cursor-pointer border-0 bg-transparent hover:bg-transparent has-aria-expanded:bg-transparent data-[state=selected]:bg-transparent animate-slide-up")}
+              style={{ animationDelay: `${Math.min(i * 30, 300)}ms` }}
               onPointerEnter={() => prepare(t)}
               onPointerLeave={cancel}
               onPointerDown={() => prepare(t, true)}
@@ -73,11 +80,11 @@ export function TrackList({ tracks, label, showCover = true, showAlbum = true, n
               tabIndex={0}
             >
               {numbered && (
-                <TableCell className="hidden w-10 text-center text-muted-foreground tabular-nums md:table-cell">
-                  {active && isPlaying ? <AudioLines className="mx-auto size-4 text-primary" /> : <span className={cn(active && "text-primary")}>{t.track ?? i + 1}</span>}
+                <TableCell className={cn(ROW_CELL, active && ROW_ACTIVE, "hidden w-10 text-center text-muted-foreground tabular-nums md:table-cell md:rounded-l-lg")}>
+                  {active && isPlaying ? <AudioLines className="mx-auto size-4 text-primary animate-[audio-wave_1s_ease-in-out_infinite]" /> : <span className={cn(active && "text-primary")}>{albumNumbers ? (t.track ?? i + 1) : i + 1}</span>}
                 </TableCell>
               )}
-              <TableCell className="py-1.5">
+              <TableCell className={cn(ROW_CELL, active && ROW_ACTIVE, "py-1.5", numbered ? "max-md:rounded-l-lg" : "rounded-l-lg")}>
                 <SwipeToQueue track={t}>
                   <div className="flex min-w-0 items-center gap-3">
                     {showCover && <Cover coverArt={t.coverArt} alt={t.album} size={80} rounded="sm" className="size-11 md:size-10" />}
@@ -92,7 +99,7 @@ export function TrackList({ tracks, label, showCover = true, showAlbum = true, n
                 </SwipeToQueue>
               </TableCell>
               {showAlbum && (
-                <TableCell className="hidden truncate text-muted-foreground lg:table-cell">
+                <TableCell className={cn(ROW_CELL, active && ROW_ACTIVE, "hidden truncate text-muted-foreground lg:table-cell")}>
                   {t.albumId ? (
                     <Link href={hrefAlbum(t.albumId)} onClick={(e) => e.stopPropagation()} className="hover:text-foreground hover:underline">
                       {t.album}
@@ -102,11 +109,11 @@ export function TrackList({ tracks, label, showCover = true, showAlbum = true, n
                   )}
                 </TableCell>
               )}
-              <TableCell className="w-20 p-0">
+              <TableCell className={cn(ROW_CELL, active && ROW_ACTIVE, "w-20 p-0")}>
                 <TrackSaveButtons track={t} className="justify-center" buttonClassName="size-9" />
               </TableCell>
-              <TableCell className="hidden w-16 text-right text-muted-foreground tabular-nums md:table-cell">{formatTime(t.duration)}</TableCell>
-              <TableCell className={cn("p-0 text-right", trailing ? "w-20" : "w-12")}>
+              <TableCell className={cn(ROW_CELL, active && ROW_ACTIVE, "hidden w-16 text-right text-muted-foreground tabular-nums md:table-cell")}>{formatTime(t.duration)}</TableCell>
+              <TableCell className={cn(ROW_CELL, active && ROW_ACTIVE, "rounded-r-lg p-0 text-right", trailing ? "w-20" : "w-12")}>
                 {trailing?.(t, i)}
                 <TrackActions track={t} className="size-11 md:size-8" />
               </TableCell>
@@ -115,13 +122,14 @@ export function TrackList({ tracks, label, showCover = true, showAlbum = true, n
         })}
       </TableBody>
     </Table>
+    </div>
     </>
   )
 }
 
 export function TrackListSkeleton({ rows = 8 }: { rows?: number }) {
   return (
-    <div className="flex flex-col gap-3 px-2">
+    <div role="status" aria-label="Cargando canciones" className="flex flex-col gap-3 px-2">
       {Array.from({ length: rows }).map((_, i) => (
         <div key={i} className="flex items-center gap-3">
           <Skeleton className="size-10 rounded-sm" />

@@ -34,9 +34,9 @@ export function publicAddress(address) {
 }
 
 /** Resolve, validate and pin DNS on every connection and redirect; never forward user credentials. */
-export function createPodcastHttp({ lookup = resolveDns, transports = { "http:": http.request, "https:": https.request } } = {}) {
+export function createPodcastHttp({ lookup = resolveDns, transports = { "http:": http.request, "https:": https.request }, validateUrl = podcastUrl } = {}) {
   return async function request(value, { method = "GET", headers = {}, signal = AbortSignal.timeout(8000) } = {}) {
-    let url = new URL(podcastUrl(value))
+    let url = new URL(validateUrl(value))
     for (let redirect = 0; redirect <= 5; redirect++) {
       signal.throwIfAborted()
       const hostname = url.hostname.replace(/^\[|\]$/g, "")
@@ -60,7 +60,7 @@ export function createPodcastHttp({ lookup = resolveDns, transports = { "http:":
       if ([301, 302, 303, 307, 308].includes(response.statusCode)) {
         response.destroy()
         if (!response.headers.location || redirect === 5) throw new MusicError("Demasiadas redirecciones del podcast.", 502)
-        url = new URL(podcastUrl(response.headers.location, url))
+        url = new URL(validateUrl(response.headers.location, url))
         continue
       }
       return { status: response.statusCode, headers: response.headers, body: response, url: url.href }

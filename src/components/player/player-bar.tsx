@@ -31,8 +31,8 @@ export function PlayerBar() {
         <div className="flex min-w-0 items-center gap-3">
           {track ? (
             <>
-              <Cover coverArt={track.coverArt} alt={track.album} size={120} className="size-14" />
-              <div className="min-w-0">
+              <Cover key={`cover:${track.id}`} coverArt={track.coverArt} alt={track.album} size={120} className="size-14" />
+              <div key={`title:${track.id}`} className="min-w-0 animate-fade-in motion-reduce:animate-none">
                 <Link href={track.albumId ? hrefAlbum(track.albumId) : "#"} className="block truncate text-sm font-medium hover:underline">
                   {track.title}
                 </Link>

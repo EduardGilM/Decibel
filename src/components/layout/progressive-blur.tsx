@@ -16,13 +16,13 @@ const LAYERS: { blur: number; from: number; to: number }[] = [
   { blur: 24, from: 55, to: 90 },
 ]
 
-export function ProgressiveBlur({ direction, fade = 48, tint = "var(--background)", strength = 88, className }: { direction: "up" | "down"; fade?: number; tint?: string; strength?: number; className?: string }) {
+export function ProgressiveBlur({ direction, fade = 48, tint = "var(--background)", strength = 88, saturation = 140, className }: { direction: "up" | "down"; fade?: number; tint?: string; strength?: number; saturation?: number; className?: string }) {
   // gradient starts at the anchored (solid) edge
   const towards = direction === "up" ? "to top" : "to bottom"
   const mask = ({ from, to }: { from: number; to: number }) => `linear-gradient(${towards}, black ${100 - to}%, transparent ${100 - from}%)`
   const layer = (l: (typeof LAYERS)[number]): CSSProperties => ({
-    backdropFilter: `blur(${l.blur}px) saturate(140%)`,
-    WebkitBackdropFilter: `blur(${l.blur}px) saturate(140%)`,
+    backdropFilter: `blur(${l.blur}px) saturate(${saturation}%)`,
+    WebkitBackdropFilter: `blur(${l.blur}px) saturate(${saturation}%)`,
     maskImage: mask(l),
     WebkitMaskImage: mask(l),
   })

@@ -43,8 +43,8 @@ export function PlayerSlider({ label, valueText, variant = "bar", className, ...
         aria-label={label}
         aria-valuetext={valueText}
         className={cn(
-          "block rounded-full bg-white shadow-[0_1px_4px_rgb(0_0_0/0.45)] transition-transform duration-150 outline-none focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-offset-2 focus-visible:ring-offset-black/40",
-          full ? "size-3.5" : "size-3 scale-0 group-hover/slider:scale-100 group-active/slider:scale-100 focus-visible:scale-100",
+          "block rounded-full bg-white shadow-[0_1px_4px_rgb(0_0_0/0.45)] transition-all duration-200 ease-out outline-none focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-offset-2 focus-visible:ring-offset-black/40",
+          full ? "size-3.5" : "size-3 scale-0 group-hover/slider:scale-110 group-active/slider:scale-125 focus-visible:scale-110",
         )}
       />
     </SliderPrimitive.Root>

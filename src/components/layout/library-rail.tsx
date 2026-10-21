@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { Library, Loader2, Plus } from "lucide-react"
+import { ArrowDownCircle, Library, Loader2, Plus } from "lucide-react"
 import { useState, type ReactNode } from "react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -13,6 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Cover } from "@/components/music/cover"
 import { hrefAlbum, hrefPlaylist } from "@/components/music/media-card"
+import { useConnection } from "@/lib/offline/connection"
 import { useProvider } from "@/lib/providers"
 import { cn } from "@/lib/utils"
 import { LikedCover, useLibrary } from "./app-sidebar"
@@ -73,6 +74,11 @@ function CreatePlaylistButton() {
 
 /** Desktop left rail (Spotify collapsed library): library, create, then only artwork. */
 export function LibraryRail() {
+  const offline = useConnection((s) => s.showDownloads)
+  return offline ? <nav aria-label="Tu biblioteca" className="hidden w-[72px] shrink-0 flex-col items-center rounded-2xl bg-card py-3 md:flex"><RailItem href="/downloads/" label="Descargadas" active><ArrowDownCircle className="size-10 p-2" /></RailItem></nav> : <OnlineLibraryRail />
+}
+
+function OnlineLibraryRail() {
   const pathname = usePathname()
   const params = useSearchParams()
   const id = params.get("id")
@@ -91,6 +97,7 @@ export function LibraryRail() {
       <CreatePlaylistButton />
       <ScrollArea className="min-h-0 w-full flex-1 [&>[data-slot=scroll-area-viewport]>div]:block!">
         <ul className="flex flex-col items-center gap-1 pt-1 pb-2">
+          <li><RailItem href="/downloads/" label="Descargadas" active={pathname.startsWith("/downloads")}><div className="flex size-12 items-center justify-center rounded-md bg-muted"><ArrowDownCircle className="size-6" /></div></RailItem></li>
           <li><RailItem href="/liked/" label="Tus me gusta" active={pathname.startsWith("/liked")}><LikedCover className="size-12 rounded-md" /></RailItem></li>
           {loading && Array.from({ length: 6 }).map((_, i) => <li key={i}><Skeleton className="m-1 size-12 rounded-md" /></li>)}
           {data?.playlists.map((p) => (

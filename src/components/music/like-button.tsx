@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { getProvider } from "@/lib/providers"
 import { cn } from "@/lib/utils"
 import { useLikes } from "@/stores/player"
+import { useState } from "react"
 
 export function useLiked(id: string | undefined, initial?: boolean) {
   const override = useLikes((s) => (id ? s.overrides[id] : undefined))
@@ -15,15 +16,18 @@ export function useLiked(id: string | undefined, initial?: boolean) {
 export function LikeButton({ id, type = "track", initial, className, size = "icon" }: { id: string; type?: "track" | "album" | "artist"; initial?: boolean; className?: string; size?: "icon" | "icon-lg" | "icon-sm" }) {
   const liked = useLiked(id, initial)
   const set = useLikes((s) => s.set)
+  const [animating, setAnimating] = useState(false)
   return (
     <Button
       variant="ghost"
       size={size}
       aria-pressed={liked}
       aria-label={liked ? "Quitar de Me gusta" : "Añadir a Me gusta"}
-      className={cn(liked ? "text-primary" : "text-muted-foreground", className)}
+      className={cn(liked ? "text-primary" : "text-muted-foreground", animating && "animate-heart-pulse", className)}
       onClick={async (e) => {
         e.stopPropagation()
+        setAnimating(true)
+        setTimeout(() => setAnimating(false), 400)
         set(id, !liked)
         try {
           if (liked) await getProvider().unstar(id, type)

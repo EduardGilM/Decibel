@@ -47,7 +47,8 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           <AppShell>{children}</AppShell>
         </TooltipProvider>
         <ProfileGate />
-        <Toaster theme="dark" position="top-center" offset={{ top: "calc(var(--safe-top) + 24px)" }} mobileOffset={{ top: "calc(var(--safe-top) + 12px)" }} />
+        {/* Bottom centre, above the player bar (desktop) or the mini player + nav (mobile); one at a time, ~2 s. */}
+        <Toaster theme="dark" position="bottom-center" visibleToasts={1} duration={2000} swipeDirections={["bottom"]} offset={{ bottom: "calc(env(safe-area-inset-bottom) + 100px)" }} mobileOffset={{ bottom: "calc(env(safe-area-inset-bottom) + 140px)", left: "0px", right: "0px" }} />
         <PwaRegister />
         <AppDialogHost />
         <NativeMediaBridge />

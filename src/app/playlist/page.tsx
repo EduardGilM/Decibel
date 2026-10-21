@@ -26,7 +26,7 @@ function SharedMeta({ pl }: { pl: ProfilePlaylist }) {
     <>
       {pl.shared && (
         <span className="mr-1 inline-flex -space-x-1.5" aria-hidden>
-          {people.slice(0, 5).map((p) => <ProfileAvatar key={p.id} name={p.name} className="size-6 text-[11px] ring-2 ring-background" />)}
+          {people.slice(0, 5).map((p) => <ProfileAvatar key={p.id} name={p.name} own className="size-6 text-[11px] ring-2 ring-background" />)}
         </span>
       )}
       {pl.role !== "owner" && pl.owner && <span className="font-semibold">de {pl.owner}</span>}
@@ -44,7 +44,7 @@ function PlaylistView() {
   const [sharing, setSharing] = useState(false)
   useEffect(() => setLocal(null), [data])
   const pl: Playlist | undefined = local ?? data
-  const profile = isProfilePlaylist(id) && pl ? (pl as ProfilePlaylist) : null
+  const profile = isProfilePlaylist(id) && pl && "members" in pl ? (pl as ProfilePlaylist) : null
   const label = `playlist:${id}`
 
   async function act<T>(work: Promise<T>, message?: string) {
@@ -66,7 +66,7 @@ function PlaylistView() {
 
   return (
     <div>
-      <TopBar />
+      <TopBar tintStrength={0} />
       {loading && (
         <>
           <HeaderSkeleton />
@@ -77,6 +77,7 @@ function PlaylistView() {
       {pl && (
         <>
           <CollectionHeader
+            bleed
             kind={profile?.shared ? "Lista compartida" : "Playlist"}
             title={pl.name}
             coverArt={pl.coverArt}
@@ -119,7 +120,7 @@ function PlaylistView() {
               </DropdownMenu>
             )}
           </CollectionHeader>
-          <div className="px-2 md:px-4">
+          <div className="relative px-2 md:px-4">
             <TrackList
               tracks={pl.tracks ?? []}
               label={label}

@@ -126,6 +126,16 @@ test("invalid profile patch values cannot bypass the last-admin invariant or res
   }
   assert.equal((await login()).status, 200)
   assert.equal((await call(path, { token, method: "PATCH", body: { role: "user" } })).status, 409)
+
+  // A failed combined edit must not reset the password or revoke other sessions first.
+  const previousHash = profiles.accounts.get(admin.id).password_hash
+  const secondSession = profiles.accounts.createSession(admin.id)
+  for (const body of [{ role: "user", password: "replacement-password" }, { active: false, password: "replacement-password" }]) {
+    assert.equal((await call(path, { token, method: "PATCH", body })).status, 409)
+    assert.equal(profiles.accounts.get(admin.id).password_hash, previousHash)
+    assert.ok(profiles.accounts.session(secondSession))
+  }
+  assert.equal((await login()).status, 200)
 })
 
 test("invalid JSON, credential types and cookies fail cleanly without verifying a password", async (t) => {

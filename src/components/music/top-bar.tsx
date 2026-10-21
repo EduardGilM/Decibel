@@ -17,7 +17,7 @@ import { BackButton, useNavigationMemory } from "./back-button"
 import { Suspense } from "react"
 import { useState } from "react"
 import { useUi } from "@/stores/ui"
-import { ProfileAvatar } from "@/components/profile/profile-avatar"
+import { AVATAR_FALLBACK, ProfileAvatar } from "@/components/profile/profile-avatar"
 import { PasswordDialog } from "@/components/profile/password-dialog"
 import { resetForProfile } from "@/lib/profile/sync"
 import { useProfile } from "@/stores/profile"
@@ -43,7 +43,7 @@ export function AccountMenu({ className }: { className?: string }) {
               <ProfileAvatar name={profile.name} color={profile.color} className="size-8 text-sm" />
             ) : (
               <Avatar className="size-8">
-                <AvatarFallback className="bg-primary text-sm font-semibold text-primary-foreground">{name.slice(0, 1).toUpperCase()}</AvatarFallback>
+                <AvatarFallback className={cn(AVATAR_FALLBACK, "text-sm font-semibold")}>{name.slice(0, 1).toUpperCase()}</AvatarFallback>
               </Avatar>
             )}
           </Button>
@@ -114,14 +114,14 @@ export function AccountMenu({ className }: { className?: string }) {
 /** Mobile sticky header with progressive blur (desktop uses DesktopTopBar in the shell).
  *  `leadingAvatar`: shows the full-width search instead of a title. No avatar on mobile: the profile panel
  *  opens by swiping from the left edge (ProfileDrawer). */
-export function TopBar({ title, children, leadingAvatar, searchPlaceholder }: { title?: string; children?: ReactNode; leadingAvatar?: boolean; searchPlaceholder?: string }) {
+export function TopBar({ title, children, leadingAvatar, searchPlaceholder, tintStrength = 96 }: { title?: string; children?: ReactNode; leadingAvatar?: boolean; searchPlaceholder?: string; tintStrength?: number }) {
   useNavigationMemory()
   const desktop = useMediaQuery("(min-width: 768px)")
   if (desktop) return null
   return (
     <header className={`sticky top-0 z-20 flex h-14 items-center gap-2 ${leadingAvatar ? "px-4" : "px-3"}`}>
       {/* Short fade (16px) so content at rest (e.g. the filter chips) sits below the blurred zone, not under it. */}
-      <ProgressiveBlur direction="down" fade={16} tint="var(--surface)" strength={96} />
+      <ProgressiveBlur direction="down" fade={16} tint="var(--surface)" strength={tintStrength} saturation={tintStrength === 0 ? 100 : 140} />
       {!leadingAvatar && <BackButton />}
       {title && !leadingAvatar && <h1 className="truncate text-lg font-semibold">{title}</h1>}
       <div className="flex min-w-0 flex-1 items-center justify-center gap-2">

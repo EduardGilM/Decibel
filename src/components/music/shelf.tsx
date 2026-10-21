@@ -1,9 +1,12 @@
 "use client"
 
 import Link from "next/link"
-import type { ReactNode } from "react"
+import type { CSSProperties, ReactNode } from "react"
+import { Children, cloneElement, isValidElement } from "react"
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
+
+type AnimatedChildProps = { style?: CSSProperties; className?: string }
 
 export function Shelf({ title, href, children }: { title: string; href?: string; children: ReactNode }) {
   return (
@@ -17,7 +20,13 @@ export function Shelf({ title, href, children }: { title: string; href?: string;
         )}
       </div>
       <ScrollArea className="w-full">
-        <div className="flex w-max gap-1 px-2 pb-3 md:px-4 [&>*]:w-36 sm:[&>*]:w-44">{children}</div>
+        <div className="flex w-max gap-1 px-2 pb-3 md:px-4 [&>*]:w-36 sm:[&>*]:w-44">
+          {Children.map(children, (child, i) =>
+            isValidElement<AnimatedChildProps>(child) ? cloneElement(child, {
+              style: { ...child.props.style, animationDelay: `${Math.min(i * 50, 500)}ms` }
+            }) : child
+          )}
+        </div>
         <ScrollBar orientation="horizontal" />
       </ScrollArea>
     </section>
@@ -26,7 +35,7 @@ export function Shelf({ title, href, children }: { title: string; href?: string;
 
 export function ShelfSkeleton() {
   return (
-    <section className="flex flex-col gap-3 px-4 md:px-6">
+    <section role="status" aria-label="Cargando recomendaciones" className="flex flex-col gap-3 px-4 md:px-6">
       <Skeleton className="h-6 w-48" />
       <div className="flex gap-3 overflow-hidden">
         {Array.from({ length: 6 }).map((_, i) => (
@@ -41,6 +50,23 @@ export function ShelfSkeleton() {
   )
 }
 
+export function GridSkeleton({ round = false }: { round?: boolean }) {
+  return (
+    <div role="status" aria-label="Cargando resultados" className="grid grid-cols-2 gap-4 px-4 sm:grid-cols-3 md:px-6 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+      {Array.from({ length: 12 }, (_, i) => <div key={i} className="flex min-w-0 flex-col gap-2"><Skeleton className={`aspect-square w-full ${round ? "rounded-full" : "rounded-lg"}`} /><Skeleton className="h-4 w-3/4" /><Skeleton className="h-3 w-1/2" /></div>)}
+    </div>
+  )
+}
+
 export function Grid({ children }: { children: ReactNode }) {
-  return <div className="grid grid-cols-2 gap-1 px-2 sm:grid-cols-3 md:px-4 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">{children}</div>
+  return (
+    <div className="grid grid-cols-2 gap-1 px-2 sm:grid-cols-3 md:px-4 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+      {Children.map(children, (child, i) =>
+        isValidElement<AnimatedChildProps>(child) ? cloneElement(child, {
+          className: `${child.props.className || ''} animate-fade-in`,
+          style: { ...child.props.style, animationDelay: `${Math.min(i * 50, 500)}ms` }
+        }) : child
+      )}
+    </div>
+  )
 }

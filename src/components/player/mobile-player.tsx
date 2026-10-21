@@ -18,6 +18,7 @@ import { chipClass } from "@/components/music/filter-chips"
 import { LyricsPanel } from "./lyrics-panel"
 import { useNowPlayingTint } from "@/lib/use-tint"
 import type { Track } from "@/lib/types"
+import { useCoverExpansion } from "@/hooks/use-cover-expansion"
 import { useMiniSwipe } from "@/hooks/use-mini-swipe"
 import { miniNeighbors, type MiniNeighbor } from "@/lib/mini-swipe"
 import { useShallow } from "zustand/react/shallow"
@@ -59,7 +60,7 @@ function MiniPeek({ neighbor, side, peekRef }: { neighbor: NonNullable<MiniNeigh
  * Cover + title of the mini player. Tap opens the full player; a horizontal swipe skips (left = next,
  * right = previous, same store actions as the buttons) with the neighbour song peeking in.
  */
-function MiniStrip({ track }: { track: Track }) {
+function MiniStrip({ track, coverRef, onOpen }: { track: Track; coverRef: React.Ref<HTMLDivElement>; onOpen: () => void }) {
   const view = usePlayer(useShallow((s) => ({
     queue: s.queue, index: s.index, repeat: s.repeat, position: s.position > 3 ? 4 : 0, hasRecommendations: !!s.recommendationLoader,
   })))
@@ -75,17 +76,17 @@ function MiniStrip({ track }: { track: Track }) {
   })
   return (
     // The blank area beside a short title opens the player too (the role=button below is only as wide as its text).
-    <div {...handlers} data-dragging={dragging || undefined} className="relative min-w-0 flex-1 cursor-pointer touch-pan-y self-stretch overflow-hidden rounded-lg flex items-center"
-      onClick={() => usePlayer.getState().setFullOpen(true)}>
+    <div {...handlers} data-mini-player="" data-dragging={dragging || undefined} className="relative min-w-0 flex-1 cursor-pointer touch-pan-y self-stretch overflow-hidden rounded-lg flex items-center"
+      onClick={onOpen}>
       <div ref={row} className="relative w-max max-w-full" style={offset ? { transform: `translate3d(${offset}px,0,0)` } : undefined}>
         {/* Only the side being revealed shows its neighbour; at rest nothing peeks. */}
         {prev && offset > 0 && <MiniPeek neighbor={prev} side="left" peekRef={prevPeek} />}
         {/* The whole area opens the player; only the artist text is a link (a link cannot sit inside a button). */}
-        <div role="button" tabIndex={0} aria-label="Abrir reproductor" aria-roledescription="Desliza para cambiar de canción" className="flex min-w-0 cursor-pointer items-center gap-3 rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          onClick={() => usePlayer.getState().setFullOpen(true)}
-          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); usePlayer.getState().setFullOpen(true) } }}>
-          <Cover coverArt={track.coverArt} alt={track.album} size={100} rounded="sm" className="size-11 shrink-0" />
-          <div className="min-w-0">
+        <div role="button" tabIndex={0} aria-label="Abrir reproductor" aria-roledescription="Desliza para cambiar de canción" className="flex min-w-0 cursor-pointer items-center gap-3 rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-ring transition-all duration-200"
+          onClick={onOpen}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen() } }}>
+          <Cover key={`cover:${track.id}`} ref={coverRef} coverArt={track.coverArt} alt={track.album} size={100} rounded="sm" className="size-11 shrink-0" />
+          <div key={`title:${track.id}`} className="min-w-0 animate-fade-in motion-reduce:animate-none">
             <div className="truncate text-sm font-medium">{track.title}</div>
             <ArtistLinks track={track} className="block truncate text-[13px] text-foreground/70" />
           </div>
@@ -114,7 +115,9 @@ function ScrollBlur() {
       {SCROLL_BLUR.map(({ blur, to }) => {
         // var(--scroll-blur) goes 0 → 52px once the list has scrolled (globals.css), so at rest nothing below the header is blurred.
         const mask = `linear-gradient(to bottom, #000 calc(3.5rem + var(--scroll-blur) * ${((to * 0.35) / 52).toFixed(3)}), transparent calc(3.5rem + var(--scroll-blur) * ${(to / 52).toFixed(3)}))`
-        return <div key={blur} className="absolute inset-0" style={{ backdropFilter: `blur(${blur}px)`, WebkitBackdropFilter: `blur(${blur}px)`, maskImage: mask, WebkitMaskImage: mask }} />
+        // opacity var(--scroll-on) (0 at rest): the header band is not blurred at all until the list scrolls. A blurred
+        // band at rest showed as a stripe over the cover gradient on Android (0.1.33).
+        return <div key={blur} className="absolute inset-0" style={{ opacity: "var(--scroll-on)", backdropFilter: `blur(${blur}px)`, WebkitBackdropFilter: `blur(${blur}px)`, maskImage: mask, WebkitMaskImage: mask }} />
       })}
     </div>
   )
@@ -134,6 +137,7 @@ export function MobilePlayer() {
   const isPlaying = usePlayer((s) => s.isPlaying)
   const fullOpen = usePlayer((s) => s.fullOpen)
   const storedTab = usePlayer((s) => s.fullTab)
+  const { miniCover, fullCover, openPlayer, sharedOpen } = useCoverExpansion(track?.id, fullOpen)
   if (!track) return null
   const podcast = !!track.podcast
   const fullTab = podcast && storedTab === "lyrics" ? "now" : storedTab // episodes have no lyrics
@@ -143,11 +147,11 @@ export function MobilePlayer() {
       <div className="fixed inset-x-2 bottom-[calc(3.5rem+env(safe-area-inset-bottom)+6px)] z-40 overflow-hidden rounded-xl glass-player shadow-lg shadow-black/20 md:hidden">
         {/* pb-3: room for the seek line so its touch zone mostly sits below the controls */}
         <div className="relative flex items-center gap-2 p-1.5 pr-1 pb-3">
-          <MiniStrip track={track} />
+          <MiniStrip track={track} coverRef={miniCover} onOpen={openPlayer} />
           {/* Spotify-style: the device picker sits in the mini player (no tab in the bottom bar). */}
           <DevicePicker className="size-10 shrink-0" />
           <TrackSaveButtons track={track} buttonClassName="size-10" />
-          <Button variant="ghost" size="icon" className="size-11 [&_svg:not([class*='size-'])]:size-6" aria-label={isPlaying ? "Pausar" : "Reproducir"} onClick={() => usePlayer.getState().toggle()}>
+          <Button variant="ghost" size="icon" className="size-11 [&_svg:not([class*='size-'])]:size-6 transition-transform active:scale-90" aria-label={isPlaying ? "Pausar" : "Reproducir"} onClick={() => usePlayer.getState().toggle()}>
             {isPlaying ? <Pause className="fill-current" /> : <Play className="fill-current" />}
           </Button>
         </div>
@@ -157,7 +161,7 @@ export function MobilePlayer() {
       <Drawer open={fullOpen} onOpenChange={(v) => usePlayer.getState().setFullOpen(v)}>
         {/* Full screen from the very top: the artwork glow sits on the sheet itself (behind the status bar and the
             handle), no top border, and the handle goes below the safe area. */}
-        <DrawerContent className="h-dvh max-h-none! rounded-none! border-0 bg-background p-0 data-[vaul-drawer-direction=bottom]:mt-0 data-[vaul-drawer-direction=bottom]:border-t-0 [&>[data-slot=drawer-handle]]:mt-[calc(var(--safe-top)+10px)]">
+        <DrawerContent data-cover-expansion={sharedOpen || undefined} className="h-dvh max-h-none! rounded-none! border-0 bg-background p-0 data-[vaul-drawer-direction=bottom]:mt-0 data-[vaul-drawer-direction=bottom]:border-t-0 [&>[data-slot=drawer-handle]]:mt-[calc(var(--safe-top)+10px)]">
           <CoverGlow coverArt={track.coverArt} height="78%" />
           <Tabs value={fullTab} onValueChange={(tab) => usePlayer.getState().setFullTab(tab as PlayerTab)} className="relative flex min-h-0 flex-1 flex-col pb-[max(env(safe-area-inset-bottom),16px)]">
             <DrawerHeader className="relative z-20 flex flex-row items-center gap-2 px-3 pt-1 pb-2">
@@ -184,10 +188,10 @@ export function MobilePlayer() {
                 {/* First screen: artwork + controls. The lyrics card peeks below, Spotify-style. */}
                 <div className="flex min-h-[calc(100dvh-7.5rem-var(--safe-top)-max(env(safe-area-inset-bottom),16px))] flex-col justify-end gap-5 px-6 pb-4">
                   <div className="flex min-h-0 flex-1 items-center justify-center">
-                    <Cover coverArt={track.coverArt} alt={track.album} size={600} rounded="lg" className="w-full max-w-[min(100%,46dvh)]" />
+                    <Cover key={`cover:${track.id}`} ref={fullCover} coverArt={track.coverArt} alt={track.album} size={600} rounded="lg" className="w-full max-w-[min(100%,46dvh)]" />
                   </div>
                   <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
+                    <div key={`title:${track.id}`} className="min-w-0 animate-fade-in motion-reduce:animate-none">
                       <h2 className="truncate text-2xl font-bold">{track.title}</h2>
                       <ArtistLinks track={track} className="block truncate text-foreground/70" onNavigate={() => usePlayer.getState().setFullOpen(false)} />
                     </div>

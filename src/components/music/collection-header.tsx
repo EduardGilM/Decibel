@@ -9,12 +9,13 @@ import { cn } from "@/lib/utils"
 import { ArtistAvatar, Cover } from "./cover"
 
 /**
- * The artwork tint melts into the page instead of ending in a hard edge: solid at the top,
- * then a smoothstep ease (zero slope at both ends, many stops, no banding) down to transparent
- * exactly at the header's bottom edge.
+ * Keep the artwork colour across the cover, title and controls. The long smoothstep tail below
+ * the header blends into the song list, with zero slope at both ends to avoid a visible edge.
  */
-export function tintFade(tint: string, strength = 42, from = 28) {
-  const stops = [`color-mix(in oklab, ${tint} ${strength}%, transparent) 0%`]
+export const tintColor = (tint: string, strength = 42) => `color-mix(in oklab, ${tint} ${strength}%, transparent)`
+
+export function tintFade(tint: string, strength = 42, from = 60) {
+  const stops = [`${tintColor(tint, strength)} 0%`]
   for (let i = 0; i <= 12; i++) {
     const t = i / 12
     const keep = 1 - t * t * (3 - 2 * t)
@@ -23,14 +24,16 @@ export function tintFade(tint: string, strength = 42, from = 28) {
   return `linear-gradient(to bottom, ${stops.join(", ")})`
 }
 
-export function CollectionHeader({ kind, title, coverArt, color, round, meta, art, children }: { kind: string; art?: ReactNode; title: string; coverArt?: string; color?: string; round?: boolean; meta?: ReactNode; children?: ReactNode }) {
+export function CollectionHeader({ kind, title, coverArt, color, round, meta, art, children, bleed = false }: { kind: string; art?: ReactNode; title: string; coverArt?: string; color?: string; round?: boolean; meta?: ReactNode; children?: ReactNode; bleed?: boolean }) {
   const provider = useProvider()
   const tint = useCoverColor(provider.coverUrl(coverArt, 64), color ?? provider.coverColor?.(coverArt))
   return (
     <div className="relative">
+      {/* With a transparent top bar, main starts below the status bar; this strip carries the tint up to the edge. */}
+      {bleed && tint && <div aria-hidden className="pointer-events-none fixed inset-x-0 top-0 h-[var(--safe-top)]" style={{ backgroundColor: tintColor(tint) }} />}
       {/* translucent tint taken from the artwork (explicit exception to flat Trace Style) */}
-      <div aria-hidden className="absolute inset-x-0 -top-14 bottom-0" style={tint ? { backgroundImage: tintFade(tint) } : undefined}>
-        {tint && <Dither mask={easedMask("to bottom", 1, 28)} />}
+      <div aria-hidden className="pointer-events-none absolute inset-x-0 -top-14 -bottom-60" style={tint ? { backgroundImage: tintFade(tint) } : undefined}>
+        {tint && <Dither opacity={0.035} mask={easedMask("to bottom", 1, 60)} />}
       </div>
       <div className="relative flex flex-col items-center gap-4 px-4 pt-4 pb-5 sm:flex-row sm:items-end sm:gap-6 md:px-6 md:pb-6">
         {art ? (
@@ -53,7 +56,7 @@ export function CollectionHeader({ kind, title, coverArt, color, round, meta, ar
 
 export function HeaderSkeleton() {
   return (
-    <div className="flex flex-col items-center gap-4 p-4 sm:flex-row sm:items-end md:p-6">
+    <div role="status" aria-label="Cargando colección" className="flex flex-col items-center gap-4 p-4 sm:flex-row sm:items-end md:p-6">
       <Skeleton className="aspect-square w-48 rounded-xl md:w-56" />
       <div className="flex w-full flex-col gap-3">
         <Skeleton className="h-4 w-16" />

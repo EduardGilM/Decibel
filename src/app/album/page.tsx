@@ -23,7 +23,7 @@ function AlbumView() {
   const label = `album:${id}`
   return (
     <div>
-      <TopBar />
+      <TopBar tintStrength={0} />
       {loading && (
         <>
           <HeaderSkeleton />
@@ -34,6 +34,7 @@ function AlbumView() {
       {album && (
         <>
           <CollectionHeader
+            bleed
             kind="Álbum"
             title={album.name}
             coverArt={album.coverArt}
@@ -70,8 +71,8 @@ function AlbumView() {
             </Button>
             <LikeButton id={album.id} type="album" initial={album.starred} size="icon-lg" className="size-12 [&_svg]:size-6!" />
           </CollectionHeader>
-          <div className="px-2 md:px-4">
-            <TrackList tracks={album.tracks ?? []} label={label} showCover={false} showAlbum={false} />
+          <div className="relative px-2 md:px-4">
+            <TrackList albumNumbers tracks={album.tracks ?? []} label={label} showCover={false} showAlbum={false} />
           </div>
         </>
       )}

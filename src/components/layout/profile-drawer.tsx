@@ -6,7 +6,8 @@ import { Dialog as SheetPrimitive } from "radix-ui"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Sheet, SheetDescription, SheetTitle } from "@/components/ui/sheet"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { ProfileAvatar } from "@/components/profile/profile-avatar"
+import { cn } from "@/lib/utils"
+import { AVATAR_FALLBACK, ProfileAvatar } from "@/components/profile/profile-avatar"
 import { PasswordDialog } from "@/components/profile/password-dialog"
 import { ThemePicker } from "@/components/theme/theme-picker"
 import { useMediaQuery } from "@/hooks/use-media-query"
@@ -18,18 +19,16 @@ import { useProfile } from "@/stores/profile"
 import { usePlayer } from "@/stores/player"
 import { FIXED_SERVER, useSession } from "@/stores/session"
 import { useUi } from "@/stores/ui"
+import { DRAWER_IGNORE, drawerDragOffset, drawerGestureIntent, drawerSettleOpen, drawerStartAllowed } from "@/lib/drawer-gesture"
 
-/** Edge zone (px) where a rightward swipe may open the panel, and the travel needed before we claim the gesture. */
-const EDGE = 24
-const LOCK = 12
 const DURATION = 240
 
-/** True if the touch started on something that owns horizontal gestures (carousels already scrolled, sliders, swipe rows…). */
+/** True if the touch started on something that owns horizontal gestures (carousels, shelves, sliders, swipe rows, mini player…). */
 function ownsHorizontalGesture(target: EventTarget | null) {
   let el = target instanceof Element ? target : null
-  if (el?.closest("input, textarea, select, [role=slider], [data-swipe-ignore], [data-vaul-drawer]")) return true
+  if (el?.closest(DRAWER_IGNORE)) return true
   while (el && el !== document.body) {
-    if (el instanceof HTMLElement && el.scrollWidth > el.clientWidth + 1 && el.scrollLeft > 0) {
+    if (el instanceof HTMLElement && el.scrollWidth > el.clientWidth + 1) {
       const overflow = getComputedStyle(el).overflowX
       if (overflow === "auto" || overflow === "scroll") return true
     }
@@ -39,7 +38,7 @@ function ownsHorizontalGesture(target: EventTarget | null) {
 }
 
 /**
- * Mobile profile panel (Spotify-style): swipe right from the left screen edge to open it; it follows the finger,
+ * Mobile profile panel (Spotify-style): swipe right from anywhere in the left half to open it (the edge itself belongs to Android's back gesture); it follows the finger,
  * and closes by swiping left, tapping outside or pressing Escape. Desktop keeps the avatar menu in the top bar.
  */
 export function ProfileDrawer() {
@@ -88,12 +87,11 @@ export function ProfileDrawer() {
       if (e.touches.length !== 1) return
       const touch = e.touches[0]
       if (openRef.current) {
-        // closing swipe: only from inside the panel
-        if (!panel.current?.contains(e.target as Node)) return
+        // closing swipe: on the panel or its overlay
         if ((e.target as Element).closest?.("input, textarea, [role=slider], [data-swipe-ignore]")) return
         track = { x: touch.clientX, y: touch.clientY, t: e.timeStamp, kind: "close", locked: false }
       } else {
-        if (touch.clientX > EDGE || window.innerWidth >= 768) return
+        if (!drawerStartAllowed(touch.clientX, window.innerWidth) || window.innerWidth >= 768) return
         // never over "¿Quién escucha?" / the connecting screen: no profile panel without a session
         const { status, user } = useProfile.getState()
         if (status === "anon" || ((status === "checking" || status === "error") && !user)) return
@@ -111,9 +109,9 @@ export function ProfileDrawer() {
       const dx = touch.clientX - track.x
       const dy = touch.clientY - track.y
       if (!track.locked) {
-        if (Math.abs(dx) < LOCK && Math.abs(dy) < LOCK) return
-        const horizontal = Math.abs(dx) > Math.abs(dy) * 1.2 && (track.kind === "open" ? dx > 0 : dx < 0)
-        if (!horizontal) { track = null; return }
+        const intent = drawerGestureIntent({ dx, dy, kind: track.kind })
+        if (intent === "wait") return
+        if (intent === "reject") { track = null; return }
         track.locked = true
         if (closeTimer.current) clearTimeout(closeTimer.current)
         if (track.kind === "open") {
@@ -126,8 +124,7 @@ export function ProfileDrawer() {
       // we own this gesture now: no page scroll, overscroll or browser back-swipe underneath the drag
       if (e.cancelable) e.preventDefault()
       const w = width.current
-      const next = track.kind === "open" ? Math.min(w, Math.max(0, w - (dx - LOCK))) : Math.min(w, Math.max(0, -dx))
-      setOffset(next)
+      setOffset(drawerDragOffset({ dx, kind: track.kind, width: w }))
       const dt = e.timeStamp - last.t
       if (dt > 0) last = { dx, t: e.timeStamp, v: (dx - last.dx) / dt }
     }
@@ -139,8 +136,7 @@ export function ProfileDrawer() {
       if (!locked) return
       const w = width.current
       const shown = w - offsetRef.current
-      const fling = Math.abs(last.v) > 0.5
-      settle(kind === "open" ? (fling ? last.v > 0 : shown > w * 0.35) : fling ? last.v > 0 : shown > w * 0.65)
+      settle(drawerSettleOpen({ kind, shown, width: w, velocity: last.v }))
     }
 
     document.addEventListener("touchstart", start, { passive: true })
@@ -164,7 +160,8 @@ export function ProfileDrawer() {
   const subtitle = mode === "subsonic" ? creds?.username ?? "Navidrome" : mode === "ytdlp" ? "YouTube Music" : "Modo demo (datos de prueba)"
   const go = (href: string) => { close(); router.push(href) }
   const shown = Math.max(0, Math.min(1, 1 - offset / width.current))
-  const transition = dragging ? "none" : `transform ${DURATION}ms cubic-bezier(0.32, 0.72, 0, 1), opacity ${DURATION}ms ease-out`
+  const reduced = typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  const transition = dragging || reduced ? "none" : `transform ${DURATION}ms cubic-bezier(0.32, 0.72, 0, 1), opacity ${DURATION}ms ease-out`
 
   return (
     <>
@@ -188,7 +185,7 @@ export function ProfileDrawer() {
                 <ProfileAvatar name={profile.name} color={profile.color} className="size-16 text-2xl" />
               ) : (
                 <Avatar className="size-16">
-                  <AvatarFallback className="bg-primary text-2xl font-semibold text-primary-foreground">{name.slice(0, 1).toUpperCase()}</AvatarFallback>
+                  <AvatarFallback className={cn(AVATAR_FALLBACK, "text-2xl font-semibold")}>{name.slice(0, 1).toUpperCase()}</AvatarFallback>
                 </Avatar>
               )}
               <div className="flex min-w-0 max-w-full flex-col">

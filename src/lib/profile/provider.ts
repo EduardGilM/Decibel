@@ -2,6 +2,7 @@
 
 import type { Album, Artist, DataSource, HomeData, MusicProvider, Playlist, Starred, Track } from "@/lib/types"
 import { usePlayer } from "@/stores/player"
+import { canUseStaleData } from "../data-cache"
 import { api } from "./api"
 
 type Kind = "track" | "album" | "artist"
@@ -39,7 +40,12 @@ function cached<T>(name: string, load: () => Promise<T>): Promise<T> {
   const storageKey = `decibel-profile-cache:${name}`
   return load().then(
     (value) => { try { localStorage.setItem(storageKey, JSON.stringify(value)) } catch {} return value },
-    (error) => { const raw = localStorage.getItem(storageKey); if (raw) return JSON.parse(raw) as T; throw error },
+    (error) => {
+      if (canUseStaleData(error)) {
+        try { const raw = localStorage.getItem(storageKey); if (raw) return JSON.parse(raw) as T } catch {}
+      } else try { localStorage.removeItem(storageKey) } catch {}
+      throw error
+    },
   )
 }
 

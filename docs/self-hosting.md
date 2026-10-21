@@ -36,7 +36,7 @@ Open `/admin` and create the other profiles. See [profiles.md](profiles.md).
 - `decibel.service`: user `decibel`, `ProtectSystem=strict`, data in `/var/lib/decibel`, listens on `127.0.0.1` only.
 - `install.sh`: installs a package built with `npm run package:server`. It backs up the database and the library
   before replacing the application, and rolls back if the health check fails.
-- `check-health.mjs`: availability check (health endpoints, authentication required, CORS, download blocking).
+- `check-health.mjs`: availability check (health endpoints, authentication required, CORS, authenticated audio).
 
 Filesystem layout created by `install.sh`. Everything that runs as root or that the service executes lives in
 root-owned trees the `decibel` user can read and run but not modify; only its state directory is writable:

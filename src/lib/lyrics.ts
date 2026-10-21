@@ -56,6 +56,18 @@ export function activeLyricsLine(lines: LyricsLine[], position: number) {
   return active
 }
 
+export function lyricsLineState(index: number, active: number): "past" | "active" | "future" {
+  return index === active ? "active" : index < active ? "past" : "future"
+}
+
+/** Place a line at `anchor` (0 top, 0.5 centre) of the usable viewport below a floating header, clamped to the scroll range. */
+export function centeredLyricsScroll({ scrollTop, lineTop, lineHeight, viewportTop, viewportHeight, scrollHeight, headerHeight = 0, anchor = 0.5 }: {
+  scrollTop: number; lineTop: number; lineHeight: number; viewportTop: number; viewportHeight: number; scrollHeight: number; headerHeight?: number; anchor?: number
+}) {
+  const center = headerHeight + (viewportHeight - headerHeight) * anchor
+  return Math.max(0, Math.min(scrollHeight - viewportHeight, scrollTop + lineTop - viewportTop + lineHeight / 2 - center))
+}
+
 export function selectLyrics(records: LyricsRecord[], lookup: LyricsLookup): LyricsResult | null {
   const matches = records.filter((record) =>
     normalized(record.trackName) === normalized(lookup.title) && normalized(cleanArtist(record.artistName)) === normalized(lookup.artist),

@@ -16,7 +16,7 @@ export default function LikedPage() {
   const tracks = data?.tracks ?? []
   return (
     <div>
-      <TopBar title="Tus me gusta" />
+      <TopBar title="Tus me gusta" tintStrength={0} />
       {loading && (
         <>
           <HeaderSkeleton />
@@ -26,11 +26,11 @@ export default function LikedPage() {
       {error && <ErrorState error={error} />}
       {data && (
         <>
-          <CollectionHeader kind="Playlist" title="Tus me gusta" color="#3b3b98" art={<LikedCover className="w-48 rounded-xl md:w-56" />} meta={<span><span className="font-semibold">{user}</span> · {tracks.length} canciones</span>}>
+          <CollectionHeader bleed kind="Playlist" title="Tus me gusta" color="#3b3b98" art={<LikedCover className="w-48 rounded-xl md:w-56" />} meta={<span><span className="font-semibold">{user}</span> · {tracks.length} canciones</span>}>
               <PlayButton tracks={tracks} label="liked" />
           </CollectionHeader>
           {tracks.length ? (
-            <div className="px-2 md:px-4">
+            <div className="relative px-2 md:px-4">
               <TrackList tracks={tracks} label="liked" numbered={false} />
             </div>
           ) : (

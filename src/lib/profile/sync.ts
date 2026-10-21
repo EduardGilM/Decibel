@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import type { HistoryEntry } from "@/lib/listen-history"
 import { createProvider } from "@/lib/providers"
 import type { DataSource, Playlist, Starred, Track } from "@/lib/types"
-import { clearDataCache } from "@/lib/use-data"
+import { clearDataCache, invalidateDataCache } from "@/lib/use-data"
 import { useHistory } from "@/stores/history"
 import { useLikes, usePlayer } from "@/stores/player"
 import { useProfile, type ProfileUser } from "@/stores/profile"
@@ -85,7 +85,7 @@ export function useProfileSync() {
       api<{ revision: string }>(`/api/me/revision?source=${mode}`).then(({ revision }) => {
         if (known !== undefined && revision !== known) {
           window.dispatchEvent(new Event("decibel:library-sync"))
-          clearDataCache()
+          invalidateDataCache()
         }
         known = revision
       }, () => {})
@@ -164,7 +164,7 @@ export async function importLocalData(data: LocalData) {
   else localStorage.removeItem(DEVICE_HISTORY)
   const fresh = await api<HistoryEntry[]>(`/api/me/history?source=${data.source}&limit=500`).catch(() => null)
   if (fresh) useHistory.setState({ entries: fresh })
-  clearDataCache()
+  invalidateDataCache()
   return result
 }
 

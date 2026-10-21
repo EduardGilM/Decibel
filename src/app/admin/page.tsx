@@ -62,7 +62,7 @@ function NewProfileDialog({ open, onOpenChange, onCreated }: { open: boolean; on
             <DialogDescription className="sr-only">Nombre y contraseña inicial del nuevo perfil.</DialogDescription>
           </DialogHeader>
           <Input aria-label="Nombre" placeholder="Nombre" value={name} onChange={(e) => setName(e.target.value)} maxLength={32} required autoFocus className={pill} />
-          <Input aria-label="Contraseña" placeholder="Contraseña" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} minLength={4} required className={pill} />
+          <Input aria-label="Contraseña" placeholder="Contraseña (mínimo 15 caracteres)" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} minLength={15} required className={pill} />
           {error && <p role="alert" className="px-1 text-sm text-red-400">{error}</p>}
           <Button type="submit" disabled={busy} className="mt-2 h-11 rounded-full text-[15px]">{busy && <Loader2 className="animate-spin" />} Crear perfil</Button>
         </form>
@@ -111,7 +111,7 @@ export default function AdminPage() {
               const self = u.id === me?.id
               return (
                 <li key={u.id} className="flex min-h-[64px] items-center gap-3.5 py-2.5 pr-2 pl-4">
-                  <ProfileAvatar name={u.name} color={u.color} className={cn("size-10 text-base", !u.active && "opacity-45")} />
+                  <ProfileAvatar name={u.name} color={u.color} own className={cn("size-10 text-base", !u.active && "opacity-45")} />
                   <div className={cn("min-w-0 flex-1", !u.active && "opacity-55")}>
                     <div className="flex items-center gap-1.5">
                       <span className="truncate text-[15px] font-medium">{u.name}</span>

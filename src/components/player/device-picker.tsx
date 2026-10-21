@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { Check, Loader2, Monitor, Smartphone, Speaker, Tablet } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { useDevices } from "@/stores/devices"
 import { cn } from "@/lib/utils"
 import { VolumeControl } from "./controls"
@@ -21,7 +21,6 @@ export function DevicePicker({ variant = "icon", className }: { variant?: "icon"
   const remote = !!active && active.id !== state.deviceId
   const pending = sending || !!state.pendingId
   const label = pending ? "Cambiando…" : active ? remote ? active.name : "Este dispositivo" : "Elegir dispositivo"
-  const alone = state.devices.length < 2
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
@@ -41,11 +40,9 @@ export function DevicePicker({ variant = "icon", className }: { variant?: "icon"
           {variant !== "icon" && <span className="truncate">{label}</span>}
         </Button>
       </DialogTrigger>
-      <DialogContent className="z-[110] max-h-[90dvh] overflow-y-auto rounded-3xl p-6">
+      <DialogContent aria-describedby={undefined} className="z-[110] max-h-[90dvh] overflow-y-auto rounded-3xl p-6">
         <DialogHeader>
           <DialogTitle>Dispositivos</DialogTitle>
-          {/* Only a hint while this is the only device. */}
-          <DialogDescription className={alone ? undefined : "sr-only"}>Abre Decibel en otro dispositivo para verlo aquí.</DialogDescription>
         </DialogHeader>
         <div className="max-h-[45dvh] space-y-2 overflow-y-auto" aria-label="Dispositivos disponibles">
           {state.devices.map((device) => {

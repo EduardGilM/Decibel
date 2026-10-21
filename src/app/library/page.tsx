@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useState } from "react"
-import { Link2 } from "lucide-react"
+import { ArrowDownCircle, Link2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { FilterChips } from "@/components/music/filter-chips"
@@ -48,6 +48,7 @@ export default function LibraryPage() {
           <h1 className="hidden text-3xl font-bold tracking-tight md:block">Tu biblioteca</h1>
           {profile && youtube && <Button variant="secondary" className="h-9 rounded-full px-4" onClick={() => useUi.setState({ playlistImportOpen: true })}><Link2 />Importar lista por enlace</Button>}
         </div>
+        <Row href="/downloads/" title="Descargadas" subtitle="En este dispositivo" art={<div className="flex size-14 items-center justify-center rounded-sm bg-muted"><ArrowDownCircle className="size-7 text-muted-foreground" /></div>} />
         <FilterChips
           className="px-2"
           value={filter}
@@ -63,8 +64,8 @@ export default function LibraryPage() {
         {error && <ErrorState error={error} />}
         <div className="flex flex-col">
           {show("playlists") && <Row href="/liked/" title="Tus me gusta" subtitle="Playlist" art={<LikedCover className="size-14" />} />}
-          {loading &&
-            Array.from({ length: 8 }).map((_, i) => (
+          {(loading || (show("podcasts") && follows.loading)) && <div role="status" aria-label="Cargando biblioteca">
+            {Array.from({ length: 8 }).map((_, i) => (
               <div key={i} className="flex items-center gap-3 px-2 py-1.5">
                 <Skeleton className="size-14 rounded-sm" />
                 <div className="flex flex-1 flex-col gap-1.5">
@@ -72,7 +73,7 @@ export default function LibraryPage() {
                   <Skeleton className="h-3 w-1/5" />
                 </div>
               </div>
-            ))}
+            ))}</div>}
           {show("playlists") &&
             data?.playlists.map((p) => <Row key={p.id} href={hrefPlaylist(p.id)} title={p.name} subtitle={`Playlist · ${p.songCount} canciones`} art={<Cover coverArt={p.coverArt} alt={p.name} size={120} rounded="sm" className="size-14" />} />)}
           {show("podcasts") &&

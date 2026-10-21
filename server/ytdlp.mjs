@@ -1,4 +1,5 @@
 import { execFile, spawn } from "node:child_process"
+import { findSameTrack, primaryArtist, songTitle } from "./track-identity.mjs"
 import { randomUUID } from "node:crypto"
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
 import { delimiter, dirname, resolve } from "node:path"
@@ -284,21 +285,6 @@ const replaceable = (error) => unplayable(error) || BOT_CHECK.test(String(error?
 /** A failed resolution the client may retry: a JSON 503 with Retry-After (Cloudflare hides an origin 502's body). */
 const temporary = (error) => error instanceof MusicError && error.status < 500 ? error
   : Object.assign(new MusicError(error?.message || "No se pudo obtener el audio de YouTube.", 503), { retryAfter: 5 })
-const fold = (value) => String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
-const words = (value) => fold(value).replace(/[^a-z0-9ñ]+/g, " ").trim()
-/** Bracketed or " - " suffixes that name a release of the same recording, not a different song. */
-const TITLE_NOISE = /^(?:(?:\d{4} )?(?:remaster(?:ed|izad[oa])?|remasterizacion)(?: \d{4})?(?: version)?|official(?: music)?(?: video| audio)?|(?:video|audio)(?: oficial| official)?|oficial|lyrics?(?: video)?|letra|live|en (?:directo|vivo)|directo|hd|hq|4k|explicit|album version|single version|radio edit|(?:feat|ft|featuring)\b.*|con .+)$/
-export function songTitle(value) {
-  let title = fold(value)
-  for (let previous; previous !== title;) {
-    previous = title
-    title = title.replace(/\s*[([]([^()[\]]*)[)\]]\s*$/, (whole, inner) => TITLE_NOISE.test(words(inner)) ? "" : whole)
-      .replace(/\s+-\s+([^-]+)$/, (whole, tail) => TITLE_NOISE.test(words(tail)) ? "" : whole)
-      .replace(/\s+(?:feat|ft|featuring)\.?\s.*$/, "")
-  }
-  return words(title)
-}
-const primaryArtist = (track) => words(track?.artists?.find((artist) => artist?.name)?.name ?? String(track?.artist ?? "").split(/,|&|\s(?:feat\.?|ft\.?|x|y|and)\s/i)[0])
 /**
  * Another upload counts as the same song only with the same title (release noise aside), the same main artist and
  * nearly the same length, and only from an official source (Topic "Art Track" or official video).
@@ -314,6 +300,8 @@ export function sameSong(known, song) {
 /** Whole budget of one stream request, below Cloudflare's 100 s origin timeout (a 524 has no CORS headers). */
 export const STREAM_BUDGET_MS = 60_000
 const ATTEMPT_MS = 40_000
+
+export { songTitle }
 
 export async function createMusicService({ dataDir, run, catalog, catalogGraceMs = CATALOG_GRACE_MS, streamBudgetMs = STREAM_BUDGET_MS }) {
   await mkdir(dataDir, { recursive: true })
@@ -691,7 +679,7 @@ export async function createMusicService({ dataDir, run, catalog, catalogGraceMs
     async addToPlaylist(id, trackId) {
       const entry = findUserPlaylist(id)
       const track = await getTrack(trackId)
-      if (!entry.trackIds.includes(track.id)) {
+      if (!entry.trackIds.includes(track.id) && !findSameTrack(entry.trackIds.map((known) => library.tracks[known]?.track).filter(Boolean), track)) {
         saveTrack(track)
         entry.trackIds.push(track.id)
         await persist()

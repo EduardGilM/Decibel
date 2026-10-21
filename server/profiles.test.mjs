@@ -51,10 +51,10 @@ test("seeds the given profiles once, case-insensitive user name", async (t) => {
   assert.equal((await call("/api/auth/login", { method: "POST", body: { username: "Dana", password: "dana" } })).status, 401)
 
   // Re-seeding never overwrites a changed password.
-  await call("/api/auth/password", { method: "POST", token: session.token, body: { current: "Dana", next: "nueva-clave" } })
+  await call("/api/auth/password", { method: "POST", token: session.token, body: { current: "Dana", next: "nueva-clave-larga-de-prueba" } })
   assert.deepEqual(await profiles.accounts.seed(FAMILY), [])
   assert.equal((await call("/api/auth/login", { method: "POST", body: { username: "Dana", password: "Dana" } })).status, 401)
-  assert.equal((await login("DANA", "nueva-clave")).user.weakPassword, false)
+  assert.equal((await login("DANA", "nueva-clave-larga-de-prueba")).user.weakPassword, false)
 })
 
 test("every /api route needs a session except login and health", async (t) => {
@@ -69,8 +69,9 @@ test("every /api route needs a session except login and health", async (t) => {
   const { token } = await login("Carlos")
   assert.equal((await call("/api/music/home", { token })).status, 200)
   assert.equal((await call("/api/music/home", { token: "forged" })).status, 401)
-  // YouTube audio cannot be fetched for offline use.
-  assert.equal((await call("/api/music/stream", { token, method: "POST", body: { id: "x" }, headers: { "X-Decibel-Purpose": "download" } })).status, 403)
+  // The download purpose never bypasses authentication; the byte endpoint also validates the song ID.
+  assert.equal((await call("/api/music/stream?id=x", { headers: { "X-Decibel-Purpose": "download" } })).status, 401)
+  assert.equal((await call("/api/music/stream?id=x", { token, headers: { "X-Decibel-Purpose": "download" } })).status, 400)
 })
 
 test("profile names require a valid cookie or bearer session, including for non-admins", async (t) => {
@@ -135,10 +136,10 @@ test("admin manages profiles; others cannot", async (t) => {
   const me = (await call("/api/auth/me", { token: admin })).body
   assert.deepEqual(me.weakProfiles, ["Alex", "Blanca", "Carlos", "Dana"])
 
-  const created = await call("/api/admin/users", { token: admin, method: "POST", body: { name: "Abuela", password: "Abuela" } })
+  const created = await call("/api/admin/users", { token: admin, method: "POST", body: { name: "Abuela", password: "clave-larga-de-prueba" } })
   assert.equal(created.status, 201)
-  assert.equal(created.body.weakPassword, true)
-  assert.equal((await call("/api/admin/users", { token: admin, method: "POST", body: { name: "abuela", password: "otra" } })).status, 409)
+  assert.equal(created.body.weakPassword, false)
+  assert.equal((await call("/api/admin/users", { token: admin, method: "POST", body: { name: "abuela", password: "otra-clave-larga-de-prueba" } })).status, 409)
 
   // Deactivating logs the profile out and hides it from sharing suggestions.
   const carlos = (await login("Carlos")).token
@@ -148,8 +149,8 @@ test("admin manages profiles; others cannot", async (t) => {
   assert.ok(!(await call("/api/auth/profiles", { token: user })).body.some((p) => p.name === "Carlos"))
 
   // Password reset by the admin.
-  await call(`/api/admin/users/${ids.Dana}`, { token: admin, method: "PATCH", body: { password: "secreta-larga" } })
-  assert.equal((await login("Dana", "secreta-larga")).user.weakPassword, false)
+  await call(`/api/admin/users/${ids.Dana}`, { token: admin, method: "PATCH", body: { password: "secreta-larga-de-prueba" } })
+  assert.equal((await login("Dana", "secreta-larga-de-prueba")).user.weakPassword, false)
   // The last admin cannot be removed or demoted.
   assert.equal((await call(`/api/admin/users/${ids.Alex}`, { token: admin, method: "PATCH", body: { active: false } })).status, 409)
   assert.equal((await call(`/api/admin/users/${ids.Alex}`, { token: admin, method: "PATCH", body: { role: "user" } })).status, 409)
@@ -158,8 +159,8 @@ test("admin manages profiles; others cannot", async (t) => {
 test("own password change requires the current one", async (t) => {
   const { call, login } = await setup(t)
   const { token } = await login("Carlos")
-  assert.equal((await call("/api/auth/password", { token, method: "POST", body: { current: "mal", next: "nueva-clave" } })).status, 403)
-  assert.equal((await call("/api/auth/password", { token, method: "POST", body: { current: "Carlos", next: "nueva-clave" } })).status, 200)
+  assert.equal((await call("/api/auth/password", { token, method: "POST", body: { current: "mal", next: "nueva-clave-larga-de-prueba" } })).status, 403)
+  assert.equal((await call("/api/auth/password", { token, method: "POST", body: { current: "Carlos", next: "nueva-clave-larga-de-prueba" } })).status, 200)
   assert.equal((await call("/api/auth/me", { token })).status, 200) // this device stays logged in
 })
 
@@ -301,8 +302,31 @@ test("first start creates only an administrator; a generated password is shown o
 
 test("first start uses DECIBEL_ADMIN_USER / DECIBEL_ADMIN_PASSWORD when given, without printing the password", async () => {
   const lines = []
-  const api = await createProfileApi({ log: (line) => lines.push(line), admin: { username: "Marta", password: "una-clave-larga" } })
+  const api = await createProfileApi({ log: (line) => lines.push(line), admin: { username: "Marta", password: "una-clave-larga-de-prueba" } })
   assert.deepEqual(api.accounts.list().map((u) => [u.username, u.role]), [["Marta", "admin"]])
-  assert.ok((await api.accounts.login("marta", "una-clave-larga", "test"))?.token)
-  assert.ok(!lines.join("\n").includes("una-clave-larga"))
+  assert.ok((await api.accounts.login("marta", "una-clave-larga-de-prueba", "test"))?.token)
+  assert.ok(!lines.join("\n").includes("una-clave-larga-de-prueba"))
+})
+
+test("new and reset passwords require a passphrase without blocking legacy logins", async (t) => {
+  const { call, login, profiles, ids } = await setup(t)
+  const admin = (await login("Alex")).token
+  const legacy = (await login("Dana")).token
+  for (const password of ["short", "x".repeat(14)]) {
+    assert.equal((await call("/api/admin/users", { token: admin, method: "POST", body: { name: "New Profile", password } })).status, 400)
+    assert.equal((await call(`/api/admin/users/${ids.Dana}`, { token: admin, method: "PATCH", body: { password } })).status, 400)
+    assert.equal((await call("/api/auth/password", { token: legacy, method: "POST", body: { current: "Dana", next: password } })).status, 400)
+  }
+  assert.equal(profiles.accounts.list().length, 4)
+  assert.equal((await login("Dana")).user.name, "Dana")
+  assert.equal((await call("/api/auth/me", { token: legacy })).status, 200)
+  assert.equal((await call("/api/admin/users", { token: admin, method: "POST", body: { name: "long-profile-name", password: "long-profile-name" } })).status, 400)
+})
+
+test("a weak configured bootstrap password is rejected before any user is created", async () => {
+  const db = openDb(":memory:")
+  try {
+    await assert.rejects(createProfileApi({ db, admin: { password: "short" }, log: () => {} }), /15/)
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM users").get().n, 0)
+  } finally { db.close() }
 })

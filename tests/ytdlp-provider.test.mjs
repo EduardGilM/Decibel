@@ -73,3 +73,9 @@ test("preparing a song preserves cancellation and only playback refreshes the li
   assert.equal(requests[2].body.refresh, true)
   assert.deepEqual(events, ["decibel:data-changed", "decibel:data-changed"])
 })
+
+test("downloads use the Decibel byte stream directly, without resolving a CDN URL on the device", async (t) => {
+  t.mock.method(globalThis, "fetch", () => { throw new Error("Must not request an extractor or CDN") })
+  const provider = new YtDlpProvider("https://music.test/decibel")
+  assert.deepEqual(await provider.downloadRequest({ id: "yt:aaaaaaaaaaa" }), { url: "https://music.test/decibel/api/music/stream?id=yt%3Aaaaaaaaaaaa", headers: {} })
+})

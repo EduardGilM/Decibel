@@ -134,6 +134,10 @@ export class YtDlpProvider implements MusicProvider {
     await this.request("prepare", { method: "POST", body: JSON.stringify({ id: track.id }), signal })
   }
 
+  async downloadRequest(track: Track) {
+    return { url: `${this.baseUrl}/api/music/stream?id=${encodeURIComponent(track.id)}`, headers: sessionHeaders(this.baseUrl) }
+  }
+
   async streamUrl(track: Track, signal?: AbortSignal, refresh = false) {
     // Resolving a URL changes nothing on the server, so a temporary failure is retried like a read.
     const stream = await this.request<StreamResult>("stream", { method: "POST", body: JSON.stringify({ id: track.id, refresh }), signal }, true)

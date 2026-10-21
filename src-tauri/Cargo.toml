@@ -17,7 +17,8 @@ serde_json = "1"
 
 # Desktop only: signed self-updates (endpoint and public key injected at build time) and relaunch.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
-tauri-plugin-updater = "2"
+# Current releases use raw NSIS/.deb installers; legacy Tauri v1 archive extraction is unnecessary.
+tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "system-proxy"] }
 tauri-plugin-process = "2"
 
 # Windows only: taskbar thumbnail buttons and system media controls (src/win_media.rs).

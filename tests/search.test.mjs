@@ -57,6 +57,8 @@ test("recent songs are separated by source, server and Subsonic account", () => 
   assert.deepEqual(Object.values(useSearch.getState().rows).map((rows) => rows[0].item.id), ["yt:a", "yt:b", "yt:c"])
 })
 
+
+
 test("history and pending changes survive reloads while the search draft and focus do not", async () => {
   useSearch.getState().remember(scope, track("a"))
   useSearch.getState().setQ("A fuego")

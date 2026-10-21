@@ -12,6 +12,7 @@ import { useProvider } from "@/lib/providers"
 import type { Playlist } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { usePlaylistPicker } from "@/stores/playlist-picker"
+import { findSameTrack } from "@/lib/track-identity"
 import { usePlaylistMembership } from "@/stores/playlist-membership"
 
 /** Single app-wide "add to playlist" popover, anchored to whichever ⊕ button opened it. */
@@ -27,7 +28,7 @@ export function PlaylistPicker() {
   const [retry, setRetry] = useState(0)
   const anchor = useMemo(() => ({ current: trigger ?? null }), [trigger])
   const membership = usePlaylistMembership((s) => s.lists)
-  const contains = (playlist: Playlist) => !!track && (playlist.tracks?.some((song) => song.id === track.id) || !!membership[playlist.id]?.includes(track.id))
+  const contains = (playlist: Playlist) => !!track && (!!findSameTrack(playlist.tracks, track) || !!findSameTrack(membership[playlist.id], track))
 
   useEffect(() => {
     if (!track) return
@@ -45,15 +46,19 @@ export function PlaylistPicker() {
 
   async function save(playlist?: Playlist) {
     if (!track || busy || !provider.createPlaylist || !provider.addToPlaylist) return
-    if (playlist && contains(playlist)) { toast(`Ya está en «${playlist.name}»`); close(); return }
+    if (playlist && contains(playlist)) { toast(`Ya está en la lista «${playlist.name}»`); close(); return }
     setBusy(true)
     setError(undefined)
     try {
       const saved = playlist ? await provider.addToPlaylist(playlist.id, track) : await provider.createPlaylist(name.trim(), track)
-      usePlaylistMembership.getState().add(saved.id, track.id) // ⊕ turns green at once; the refresh confirms it
+      usePlaylistMembership.getState().add(saved.id, track) // ⊕ turns green at once; the refresh confirms it
       toast.success(playlist ? `Añadida a «${saved.name}»` : `Lista «${saved.name}» creada con esta canción`)
       close()
-    } catch (error) { setError((error as Error).message) }
+    } catch (error) {
+      // The server found the same song already there (another id / source): same answer as the local check.
+      if (playlist && (error as Error).message === "Ya está en la lista.") { usePlaylistMembership.getState().add(playlist.id, track); toast(`Ya está en la lista «${playlist.name}»`); close() }
+      else setError((error as Error).message)
+    }
     finally { setBusy(false) }
   }
 

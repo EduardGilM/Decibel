@@ -11,7 +11,7 @@ import { LikeButton } from "./like-button"
 
 export function TrackSaveButtons({ track, className, buttonClassName }: { track: Track; className?: string; buttonClassName?: string }) {
   const provider = useProvider()
-  const saved = useInPlaylist(provider.createPlaylist && provider.addToPlaylist && !track.podcast ? track.id : undefined)
+  const saved = useInPlaylist(provider.createPlaylist && provider.addToPlaylist && !track.podcast ? track : undefined)
   if (track.podcast) return null // episodes are followed per programme and keep their own progress
   return (
     <div className={cn("flex shrink-0 items-center", className)} onKeyDown={(event) => event.stopPropagation()}>

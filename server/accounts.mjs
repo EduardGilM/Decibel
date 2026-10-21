@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID, scrypt as scryptCb, timingSafeEqual } from "node:crypto"
 import { promisify } from "node:util"
 import { MusicError } from "./errors.mjs"
+import { transaction } from "./db.mjs"
 
 const scrypt = promisify(scryptCb)
 const SCRYPT = { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }
@@ -22,10 +23,17 @@ export async function verifyPassword(password, stored) {
 }
 
 /** A password equal to the user name (or very short) gets a gentle warning in /admin. */
-export const isWeak = (password, username) => password.trim().toLowerCase() === username.trim().toLowerCase() || password.length < 6
+export const isWeak = (password, username) => password.trim().toLowerCase() === username.trim().toLowerCase() || [...password.normalize("NFC")].length < 15
 
 export function validatePassword(password) {
   if (typeof password !== "string" || password.length < 4 || password.length > 200) throw new MusicError("La contraseña debe tener entre 4 y 200 caracteres.")
+}
+
+/** New credentials need a passphrase; legacy hashes and explicitly seeded fixtures remain readable. */
+export function validateNewPassword(password, username) {
+  validatePassword(password)
+  if ([...password.normalize("NFC")].length < 15) throw new MusicError("La contraseña debe tener entre 15 y 200 caracteres.")
+  if (typeof username === "string" && password.trim().toLowerCase() === username.trim().toLowerCase()) throw new MusicError("La contraseña debe ser distinta del nombre del perfil.")
 }
 
 export function validateUsername(username) {
@@ -76,6 +84,7 @@ export function createAccounts(db, { now = () => Date.now() } = {}) {
       if (db.prepare("SELECT COUNT(*) AS n FROM users").get().n > 0) return null
       const generated = !password
       const secret = password || randomBytes(12).toString("base64url")
+      validateNewPassword(secret, username || "admin")
       const user = await accounts.createUser({ username: username || "admin", password: secret, role: "admin" })
       return { user, password: generated ? secret : undefined }
     },
@@ -108,13 +117,33 @@ export function createAccounts(db, { now = () => Date.now() } = {}) {
     },
     logout: (token) => { if (token) db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(tokenHash(token)) },
     async setPassword(userId, password, { keepToken } = {}) {
-      validatePassword(password)
+      validateNewPassword(password)
       const row = byId.get(userId)
       if (!row) throw new MusicError("Perfil no encontrado.", 404)
+      validateNewPassword(password, row.username)
       db.prepare("UPDATE users SET password_hash = ?, weak_password = ?, password_changed_at = ? WHERE id = ?").run(await hashPassword(password), isWeak(password, row.username) ? 1 : 0, now(), userId)
       // Other devices must log in again with the new password.
       if (keepToken) db.prepare("DELETE FROM sessions WHERE user_id = ? AND token_hash <> ?").run(userId, tokenHash(keepToken))
       else db.prepare("DELETE FROM sessions WHERE user_id = ?").run(userId)
+    },
+    /** Hash outside the transaction; validate and commit the full admin edit atomically. */
+    async editUser(userId, { active, role, password }, actor, { keepToken } = {}) {
+      validateProfileUpdate({ active, role })
+      if (password !== undefined) validateNewPassword(password)
+      const row = byId.get(userId)
+      if (!row) throw new MusicError("Perfil no encontrado.", 404)
+      if (password !== undefined) validateNewPassword(password, row.username)
+      const hash = password === undefined ? undefined : await hashPassword(password)
+      return transaction(db, () => {
+        accounts.update(userId, { active, role }, actor)
+        if (hash !== undefined) {
+          db.prepare("UPDATE users SET password_hash = ?, weak_password = ?, password_changed_at = ? WHERE id = ?")
+            .run(hash, isWeak(password, row.username) ? 1 : 0, now(), userId)
+          if (keepToken) db.prepare("DELETE FROM sessions WHERE user_id = ? AND token_hash <> ?").run(userId, tokenHash(keepToken))
+          else db.prepare("DELETE FROM sessions WHERE user_id = ?").run(userId)
+        }
+        return publicUser(byId.get(userId))
+      })
     },
     update(userId, { active, role }, actor) {
       validateProfileUpdate({ active, role })

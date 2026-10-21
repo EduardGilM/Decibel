@@ -43,9 +43,16 @@ It runs as a web app/PWA and as an Android app built with Tauri.
 
 - **YouTube Music catalogue**: search with suggestions (songs, albums, artists), album and artist pages, artist
   recommendations, similar artists and automatic radio when the queue ends. No Google account required.
-- **Streaming with yt-dlp**: the server only resolves a short-lived audio URL; the device streams it directly.
-  Audio from YouTube is never stored, and offline downloads are blocked for that source.
-- **Navidrome / Subsonic** as an alternative source, with offline downloads (Subsonic only).
+- **Streaming with yt-dlp**: the server resolves a short-lived audio URL. Normal playback streams directly;
+  an authenticated, restricted audio proxy supports buffering and optional local downloads. The server does
+  not persist audio files.
+- **Offline music**: optional device-local downloads for music sources, with storage limits, cancellation,
+  offline playback and artwork. Downloads are separated by server, source and profile. Podcast episodes use
+  their own streaming path. Only save content you are permitted to copy.
+- **Connection recovery**: brief server outages keep the current page, navigation, artwork and colours.
+  The downloads view appears after two continuous minutes offline. Already buffered/prepared or downloaded
+  audio keeps playing; reconnection restores the page without reloading healthy playback.
+- **Navidrome / Subsonic** as an alternative source.
 - **Podcasts**: search, RSS feeds, follow shows, "continue listening" and top charts per country (Apple's public charts).
 - **Profiles**: login with long-lived sessions and an admin panel. Each profile has its own likes, history,
   playlists (private, shared with viewer/editor roles, or collaborative), settings, Home, albums, artists and a
@@ -58,7 +65,8 @@ It runs as a web app/PWA and as an Android app built with Tauri.
 - **Queue**: swipe a song right to add it to the queue and left to remove it (touch, mouse drag or touchpad),
   also from the «…» menu and right-click; an «A continuación» card in the desktop side panel, and swipe the mini
   player to skip tracks.
-- **Recent searches** synced per profile across devices (local cache, offline queue).
+- **Browse and listening history**: recent visits, continue listening, loading placeholders and keyboard
+  shortcuts. Search queries are no longer recorded by the search interface.
 - **Devices**: music plays where you start it; pick another output among the devices open with the same profile
   (Spotify Connect style) and song, position and queue move along, while the others become remotes. Likes and playlists also sync across
   devices automatically. See [docs/devices.md](docs/devices.md).
@@ -66,6 +74,8 @@ It runs as a web app/PWA and as an Android app built with Tauri.
   [Exportify](https://exportify.app) ZIP or, optionally, with a Spotify app on the server. Songs are matched on
   YouTube Music in the background. See [docs/spotify-import.md](docs/spotify-import.md).
 - **Themes**, including a dynamic one that derives the accent colour from the current artwork.
+- **Player motion**: expanding artwork, progressive lyrics, animated panels, a swipe-open profile menu,
+  compact sharing controls and album/playlist header colours.
 - **Platforms**: web, installable PWA, an Android app and desktop apps for Windows and Linux (Tauri v2). Android
   has a media notification, background playback, fades the music out during calls and voice notes, and
   **Android Auto** (browse the queue, likes and playlists, voice search); the desktop apps have an integrated title bar, and on
@@ -90,6 +100,8 @@ It runs as a web app/PWA and as an Android app built with Tauri.
 - **Frontend**: Next.js 15 with `output: "export"` (static files, routes use `?id=` query strings). Music sources
   implement the `MusicProvider` interface in `src/lib/types.ts` (`ytdlp`, `subsonic`, `mock`, plus podcasts).
 - **Server**: a single Node.js process serves the static web app and the `/api/*` endpoints. No external database.
+  `/api/music/stream` can relay audio for buffering/downloads after authentication; it restricts destinations
+  to the expected HTTPS audio CDN and validates DNS and redirects.
 - **Android**: the same web build packaged with Tauri v2, plus a small native layer
   ([src-tauri/android-overlay/](src-tauri/android-overlay/README.md)) for the media session, notification and
   foreground playback service and in-app updates.

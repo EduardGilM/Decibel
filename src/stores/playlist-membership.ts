@@ -3,15 +3,16 @@
 import { create } from "zustand"
 import { getProvider } from "@/lib/providers"
 import type { Playlist } from "@/lib/types"
+import { findSameTrack, trackRef, type TrackRef } from "../lib/track-identity.ts"
 
 /**
  * Which of the user's own (editable) playlists contain each track, so ⊕ can turn into a green ✓.
  * The list summary is cheap; a playlist's tracks are only re-fetched when its rev / updatedAt / size changes.
  */
 interface MembershipState {
-  /** playlist id → track ids */
-  lists: Record<string, string[]>
-  add: (playlistId: string, trackId: string) => void
+  /** playlist id → its songs (identity fields only) */
+  lists: Record<string, TrackRef[]>
+  add: (playlistId: string, track: TrackRef) => void
   refresh: () => Promise<void>
 }
 
@@ -25,9 +26,9 @@ let profileVersion = 0
 
 export const usePlaylistMembership = create<MembershipState>()((set, get) => ({
   lists: {},
-  add: (playlistId, trackId) => {
+  add: (playlistId, track) => {
     const current = get().lists[playlistId] ?? []
-    if (!current.includes(trackId)) set({ lists: { ...get().lists, [playlistId]: [...current, trackId] } })
+    if (!findSameTrack(current, track)) set({ lists: { ...get().lists, [playlistId]: [...current, trackRef(track)] } })
   },
   refresh: async () => {
     if (running) { again = true; return running }
@@ -37,14 +38,14 @@ export const usePlaylistMembership = create<MembershipState>()((set, get) => ({
         const provider = getProvider()
         const own = ((await provider.getPlaylists()) as Summary[]).filter((p) => p.editable === true)
         if (profile !== profileVersion) return
-        const next: Record<string, string[]> = {}
+        const next: Record<string, TrackRef[]> = {}
         const nextVersions = new Map<string, string>()
         await Promise.all(own.map(async (p) => {
           nextVersions.set(p.id, version(p))
           const known = get().lists[p.id]
           if (known && versions.get(p.id) === version(p)) { next[p.id] = known; return }
           const tracks = p.tracks ?? (await provider.getPlaylist(p.id)).tracks ?? []
-          next[p.id] = tracks.map((t) => t.id)
+          next[p.id] = tracks.map(trackRef)
         }))
         if (profile !== profileVersion) return
         // Publish versions with their tracks only after the complete batch succeeds.
@@ -68,7 +69,8 @@ function start() {
   void usePlaylistMembership.getState().refresh()
 }
 
-export function useInPlaylist(trackId: string | undefined) {
+/** ✓ state: the same song (any source / id) is in one of the user's playlists. */
+export function useInPlaylist(track: TrackRef | undefined) {
   start()
-  return usePlaylistMembership((s) => !!trackId && Object.values(s.lists).some((ids) => ids.includes(trackId)))
+  return usePlaylistMembership((s) => !!track && Object.values(s.lists).some((list) => !!findSameTrack(list, track)))
 }

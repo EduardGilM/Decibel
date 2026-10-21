@@ -33,17 +33,18 @@ export function TransportControls({ size = "md", className }: { size?: "md" | "l
   const side = lg ? "size-12 [&_svg:not([class*='size-'])]:size-6" : "size-9 [&_svg:not([class*='size-'])]:size-[18px]"
   const skip = lg ? "size-14 [&_svg:not([class*='size-'])]:size-8" : "size-9 [&_svg:not([class*='size-'])]:size-5"
   const main = lg ? "size-16 [&_svg:not([class*='size-'])]:size-7" : "size-9 [&_svg:not([class*='size-'])]:size-4"
+  const [pressing, setPressing] = useState(false)
   if (podcastId) return <PodcastControls podcastId={podcastId} lg={lg} side={side} skip={skip} main={main} className={className} />
 
   return (
     <div className={cn("flex items-center justify-center", lg ? "w-full justify-between" : "gap-2", className)}>
       <Tip label={shuffle ? "Desactivar aleatorio" : "Activar aleatorio"}>
-        <Button variant="ghost" size="icon" aria-pressed={shuffle} aria-label="Aleatorio" className={cn(side, "rounded-full", shuffle ? ACTIVE_TOGGLE : SECONDARY)} onClick={() => p().toggleShuffle()}>
+        <Button variant="ghost" size="icon" aria-pressed={shuffle} aria-label="Aleatorio" className={cn(side, "rounded-full transition-transform active:scale-95", shuffle ? ACTIVE_TOGGLE : SECONDARY)} onClick={() => p().toggleShuffle()}>
           <Shuffle />
         </Button>
       </Tip>
       <Tip label="Anterior">
-        <Button variant="ghost" size="icon" aria-label="Anterior" disabled={!hasTrack} className={cn(skip, "rounded-full")} onClick={() => p().prev()}>
+        <Button variant="ghost" size="icon" aria-label="Anterior" disabled={!hasTrack} className={cn(skip, "rounded-full transition-transform active:scale-95")} onClick={() => p().prev()}>
           <SkipBack className="fill-current" />
         </Button>
       </Tip>
@@ -53,19 +54,22 @@ export function TransportControls({ size = "md", className }: { size?: "md" | "l
           size="icon"
           aria-label={isPlaying ? "Pausar" : "Reproducir"}
           disabled={!hasTrack}
-          className={cn(main, "rounded-full bg-foreground text-background hover:bg-foreground/85")}
+          className={cn(main, "rounded-full bg-foreground text-background hover:bg-foreground/85 transition-transform active:scale-90", pressing && "animate-press-scale")}
+          onMouseDown={() => setPressing(true)}
+          onMouseUp={() => setPressing(false)}
+          onMouseLeave={() => setPressing(false)}
           onClick={() => p().toggle()}
         >
           {buffering && isPlaying ? <Loader2 className="animate-spin" /> : isPlaying ? <Pause className="fill-current" /> : <Play className="ml-0.5 fill-current" />}
         </Button>
       </Tip>
       <Tip label="Siguiente">
-        <Button variant="ghost" size="icon" aria-label="Siguiente" disabled={!hasTrack} className={cn(skip, "rounded-full")} onClick={() => p().next()}>
+        <Button variant="ghost" size="icon" aria-label="Siguiente" disabled={!hasTrack} className={cn(skip, "rounded-full transition-transform active:scale-95")} onClick={() => p().next()}>
           <SkipForward className="fill-current" />
         </Button>
       </Tip>
       <Tip label={repeat === "off" ? "Repetir todo" : repeat === "all" ? "Repetir una" : "No repetir"}>
-        <Button variant="ghost" size="icon" aria-pressed={repeat !== "off"} aria-label={repeat === "off" ? "Activar repetir toda la cola" : repeat === "all" ? "Activar repetir canción" : "Desactivar repetición"} className={cn(side, "rounded-full", repeat !== "off" ? ACTIVE_TOGGLE : SECONDARY)} onClick={() => p().cycleRepeat()}>
+        <Button variant="ghost" size="icon" aria-pressed={repeat !== "off"} aria-label={repeat === "off" ? "Activar repetir toda la cola" : repeat === "all" ? "Activar repetir canción" : "Desactivar repetición"} className={cn(side, "rounded-full transition-transform active:scale-95", repeat !== "off" ? ACTIVE_TOGGLE : SECONDARY)} onClick={() => p().cycleRepeat()}>
           {repeat === "one" ? <Repeat1 /> : <Repeat />}
         </Button>
       </Tip>
@@ -79,6 +83,7 @@ function PodcastControls({ podcastId, lg, side, skip, main, className }: { podca
   const buffering = usePlayer((s) => s.buffering)
   const rate = usePodcastPrefs((s) => s.rate)
   const p = usePlayer.getState
+  const [pressing, setPressing] = useState(false)
   const jump = (Icon: typeof RotateCcw, seconds: number) => (
     <span className="relative flex items-center justify-center">
       <Icon className={lg ? "size-9 stroke-[1.6]" : "size-6 stroke-[1.8]"} />
@@ -88,27 +93,27 @@ function PodcastControls({ podcastId, lg, side, skip, main, className }: { podca
   return (
     <div className={cn("flex items-center justify-center", lg ? "w-full justify-between" : "gap-2", className)}>
       <Tip label="Velocidad de reproducción">
-        <Button variant="ghost" size="icon" aria-label={`Velocidad ${formatRate(rate)}`} className={cn(side, "rounded-full font-semibold tabular-nums", lg ? "text-[15px]" : "text-xs", rate !== 1 ? ACTIVE_TOGGLE : SECONDARY)} onClick={() => usePodcastPrefs.getState().cycleRate()}>
+        <Button variant="ghost" size="icon" aria-label={`Velocidad ${formatRate(rate)}`} className={cn(side, "rounded-full font-semibold tabular-nums transition-transform active:scale-95", lg ? "text-[15px]" : "text-xs", rate !== 1 ? ACTIVE_TOGGLE : SECONDARY)} onClick={() => usePodcastPrefs.getState().cycleRate()}>
           {formatRate(rate)}
         </Button>
       </Tip>
       <Tip label={`Retroceder ${SKIP_BACK} s`}>
-        <Button variant="ghost" size="icon" aria-label={`Retroceder ${SKIP_BACK} segundos`} className={cn(skip, "rounded-full")} onClick={() => skipBy(-SKIP_BACK)}>
+        <Button variant="ghost" size="icon" aria-label={`Retroceder ${SKIP_BACK} segundos`} className={cn(skip, "rounded-full transition-transform active:scale-95")} onClick={() => skipBy(-SKIP_BACK)}>
           {jump(RotateCcw, SKIP_BACK)}
         </Button>
       </Tip>
       <Tip label={isPlaying ? "Pausar" : "Reproducir"}>
-        <Button variant="default" size="icon" aria-label={isPlaying ? "Pausar" : "Reproducir"} className={cn(main, "rounded-full bg-foreground text-background hover:bg-foreground/85")} onClick={() => p().toggle()}>
+        <Button variant="default" size="icon" aria-label={isPlaying ? "Pausar" : "Reproducir"} className={cn(main, "rounded-full bg-foreground text-background hover:bg-foreground/85 transition-transform active:scale-90", pressing && "animate-press-scale")} onMouseDown={() => setPressing(true)} onMouseUp={() => setPressing(false)} onMouseLeave={() => setPressing(false)} onClick={() => p().toggle()}>
           {buffering && isPlaying ? <Loader2 className="animate-spin" /> : isPlaying ? <Pause className="fill-current" /> : <Play className="ml-0.5 fill-current" />}
         </Button>
       </Tip>
       <Tip label={`Avanzar ${SKIP_FORWARD} s`}>
-        <Button variant="ghost" size="icon" aria-label={`Avanzar ${SKIP_FORWARD} segundos`} className={cn(skip, "rounded-full")} onClick={() => skipBy(SKIP_FORWARD)}>
+        <Button variant="ghost" size="icon" aria-label={`Avanzar ${SKIP_FORWARD} segundos`} className={cn(skip, "rounded-full transition-transform active:scale-95")} onClick={() => skipBy(SKIP_FORWARD)}>
           {jump(RotateCw, SKIP_FORWARD)}
         </Button>
       </Tip>
       <Tip label="Ver el podcast">
-        <Button variant="ghost" size="icon" asChild aria-label="Ver el podcast" className={cn(side, "rounded-full", SECONDARY)}>
+        <Button variant="ghost" size="icon" asChild aria-label="Ver el podcast" className={cn(side, "rounded-full transition-transform active:scale-95", SECONDARY)}>
           <Link href={hrefPodcast(podcastId)} onClick={() => p().setFullOpen(false)}><ListVideo /></Link>
         </Button>
       </Tip>

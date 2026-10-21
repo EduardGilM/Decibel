@@ -3,6 +3,7 @@
 import { useMemo } from "react"
 import type { DataSource, MusicProvider } from "@/lib/types"
 import { withOffline } from "@/lib/offline/downloads"
+import { sourceScope } from "@/lib/offline/context"
 import { withProfile } from "@/lib/profile/provider"
 import { useProfile } from "@/stores/profile"
 import { useSession } from "@/stores/session"
@@ -15,9 +16,8 @@ let mock: MockProvider | null = null
 
 export function createProvider(mode: DataSource | null, creds: ReturnType<typeof useSession.getState>["creds"], ytdlpUrl = "", profile?: string | null): MusicProvider {
   const base = mode === "subsonic" && creds ? new SubsonicProvider(creds) : mode === "ytdlp" ? new YtDlpProvider(ytdlpUrl) : (mock ??= new MockProvider())
-  const source = withOffline(base) // downloaded copies first (never for YouTube)
   // Signed-in profile: likes and user playlists live on the Decibel server, per profile.
-  return withPodcasts(profile ? withProfile(source) : source)
+  return withOffline(withPodcasts(profile ? withProfile(base) : base), sourceScope(base.kind, creds, ytdlpUrl, profile ?? null))
 }
 
 const profileId = (s: ReturnType<typeof useProfile.getState>) => (s.status === "unavailable" ? null : s.user?.id ?? null)

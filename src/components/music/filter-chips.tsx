@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 
 /** Shared pill styling, also reused by true tabs (full-screen player) so everything looks the same. */
 export const chipClass =
-  "rounded-full! border-0 bg-foreground/10 px-3.5 text-[13px] font-medium text-foreground shadow-none transition-colors duration-150 hover:bg-foreground/20 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground data-[state=on]:hover:bg-primary/90 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
+  "rounded-full! border-0 bg-foreground/10 px-3.5 text-[13px] font-medium text-foreground shadow-none transition-all duration-200 hover:bg-foreground/20 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground data-[state=on]:hover:bg-primary/90 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
 
 /** Horizontally scrollable pill filters (Spotify-style). No container box. */
 /** `extra`: non-filter pills (links) appended to the same scrolling row, e.g. Inicio → Wrapped. */

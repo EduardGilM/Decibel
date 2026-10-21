@@ -5,22 +5,26 @@ import { ArrowDown, Check, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { canDownload, download, offlineKey, removeDownloads, useOffline } from "@/lib/offline/downloads"
+import { useOfflineScope } from "@/lib/offline/context"
+import { useConnection } from "@/lib/offline/connection"
 import { getProvider, useProvider } from "@/lib/providers"
 import type { Track } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-/** Download / remove a whole album or list for offline listening. Hidden for YouTube. */
+/** Download / remove a whole album or list on this device. */
 export function DownloadButton({ tracks, className }: { tracks?: Track[]; className?: string }) {
   const provider = useProvider()
   const source = provider.kind
-  const keys = (tracks ?? []).filter((t) => canDownload(source, t)).map((t) => offlineKey(source, t.id))
+  const scope = useOfflineScope()
+  const offline = useConnection((s) => s.offline)
+  const keys = (tracks ?? []).filter((t) => canDownload(source, t)).map((t) => offlineKey(source, t.id, scope))
   const saved = useOffline((s) => keys.filter((k) => s.items[k]).length)
   const busy = useOffline((s) => keys.filter((k) => s.pending[k]).length)
   if (!canDownload(source) || !keys.length) return null
   const done = saved === keys.length
 
   async function onClick() {
-    if (busy) return
+    if (busy || (offline && !done)) return
     if (done) {
       if (await confirmDialog({ title: "¿Quitar la descarga?", description: "Tendrás que estar conectado para escucharla.", confirmLabel: "Quitar", destructive: true })) await removeDownloads(keys)
       return
@@ -39,12 +43,13 @@ export function DownloadButton({ tracks, className }: { tracks?: Track[]; classN
       variant="ghost"
       size="icon-lg"
       onClick={onClick}
+      disabled={offline && !done}
       aria-label={done ? "Quitar descarga" : busy ? `Descargando ${saved} de ${keys.length}` : "Descargar"}
       title={done ? "Descargado" : busy ? `Descargando ${saved}/${keys.length}` : "Descargar para escuchar sin conexión"}
       className={cn("relative rounded-full text-muted-foreground", done && "text-foreground", className)}
     >
       {busy ? (
-        <Loader2 className="animate-spin" />
+        <Loader2 className="animate-spin motion-reduce:animate-none" />
       ) : (
         <span className={cn("flex size-6 items-center justify-center rounded-full border-2", done ? "border-foreground bg-foreground text-background" : "border-current")}>
           {done ? <Check className="size-3.5" strokeWidth={3} /> : <ArrowDown className="size-3.5" strokeWidth={2.5} />}

@@ -23,7 +23,7 @@ renderToString(createElement(MembershipConsumer))
 await settle()
 
 const refresh = () => usePlaylistMembership.getState().refresh()
-const lists = () => usePlaylistMembership.getState().lists
+const lists = () => Object.fromEntries(Object.entries(usePlaylistMembership.getState().lists).map(([id, songs]) => [id, songs.map((song) => song.id)]))
 const changeProfile = () => window.dispatchEvent(new Event("decibel:profile-changed"))
 const summary = (id, rev = 1) => ({ id, name: id, editable: true, songCount: 1, rev })
 const deferred = () => { let resolve; const promise = new Promise((done) => { resolve = done }); return { promise, resolve } }

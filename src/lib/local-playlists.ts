@@ -1,3 +1,4 @@
+import { findSameTrack } from "./track-identity.ts"
 import type { Playlist, Track } from "./types"
 
 /**
@@ -59,13 +60,13 @@ export function addToLocalPlaylist(state: LocalPlaylistState, base: Playlist | u
   const own = state.created.find((list) => list.id === id)
   if (own) {
     const current = own.tracks ?? []
-    if (current.some((song) => song.id === track.id)) return { state, playlist: own, duplicate: true }
+    if (findSameTrack(current, track)) return { state, playlist: own, duplicate: true }
     const playlist = summarise({ ...own, coverArt: own.coverArt ?? track.coverArt }, [...current, stored(track)])
     return { state: { ...state, created: state.created.map((list) => (list.id === id ? playlist : list)) }, playlist, duplicate: false }
   }
   if (!base) throw new Error("Playlist no encontrada")
   const merged = withLocalAdditions(state, base)
-  if (merged.tracks?.some((song) => song.id === track.id)) return { state, playlist: merged, duplicate: true }
+  if (findSameTrack(merged.tracks, track)) return { state, playlist: merged, duplicate: true }
   const added = [...(state.added[id] ?? []), stored(track)]
   const next = { ...state, added: { ...state.added, [id]: added } }
   return { state: next, playlist: withLocalAdditions(next, base), duplicate: false }

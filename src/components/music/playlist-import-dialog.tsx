@@ -7,7 +7,6 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { api } from "@/lib/profile/api"
 import { clearDataCache } from "@/lib/use-data"
 import { useUi } from "@/stores/ui"
@@ -120,8 +119,8 @@ export function PlaylistImport({ profileId }: { profileId: string }) {
     <Dialog open={open} onOpenChange={(playlistImportOpen) => useUi.setState({ playlistImportOpen })}>
       <DialogContent className="glass-player border-0 ring-0 sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Importar lista por enlace</DialogTitle>
-          <DialogDescription>Pega el enlace de una lista pública de Spotify para guardarla en tu biblioteca.</DialogDescription>
+          <DialogTitle>Importar lista</DialogTitle>
+          <DialogDescription className="sr-only">Importa una lista pública de Spotify.</DialogDescription>
         </DialogHeader>
         <form className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); void start() }}>
           {active && job ? (
@@ -132,19 +131,14 @@ export function PlaylistImport({ profileId }: { profileId: string }) {
                   <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${Math.round(job.done / job.total * 100)}%` }} />
                 </div>
               )}
-              <p className="text-xs text-muted-foreground">Puedes cerrar esta ventana; la importación continuará.</p>
             </div>
           ) : (
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="playlist-import-url">Enlace de Spotify</Label>
-              <Input id="playlist-import-url" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} autoFocus placeholder="https://open.spotify.com/playlist/…" value={url} maxLength={2048} disabled={submitting} onChange={(event) => setUrl(event.target.value)} required />
-              <p className="text-xs text-muted-foreground">Las canciones se buscan en YouTube Music. Al terminar verás cuántas se han encontrado.</p>
-            </div>
+            <Input id="playlist-import-url" aria-label="Enlace de Spotify" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} autoFocus placeholder="Enlace de Spotify" value={url} maxLength={2048} disabled={submitting} onChange={(event) => setUrl(event.target.value)} required />
           )}
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <DialogFooter className="border-t-0 bg-transparent">
             {active ? <Button type="button" variant="ghost" className="h-11 rounded-full" onClick={() => useUi.setState({ playlistImportOpen: false })}>Cerrar</Button>
-              : <Button type="submit" className="h-11 rounded-full px-6" disabled={busy || !url.trim()}>{submitting && <Loader2 className="animate-spin" />}Importar lista</Button>}
+              : <Button type="submit" className="h-11 w-full rounded-full px-6" disabled={busy || !url.trim()}>{submitting && <Loader2 className="animate-spin" />}Importar</Button>}
           </DialogFooter>
         </form>
       </DialogContent>

@@ -2,7 +2,8 @@
 
 import { ArtistLinks } from "@/components/music/artist-links"
 import Link from "next/link"
-import type { CSSProperties } from "react"
+import { useEffect, useState, type CSSProperties } from "react"
+import { cn } from "@/lib/utils"
 import { X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -37,12 +38,50 @@ function PanelUpNext() {
 export function NowPlayingPanel() {
   const track = usePlayer((s) => s.queue[s.index])
   const open = usePlayer((s) => s.panelOpen)
+  const desktop = useMediaQuery("(min-width: 1280px)")
+  const want = desktop && open && !!track
+  // mounted: in the DOM (kept during the closing slide); expanded: at full width. A panel restored open on load
+  // starts expanded with no transition; only later toggles animate.
+  const [mounted, setMounted] = useState(want)
+  const [expanded, setExpanded] = useState(want)
+  const [animate, setAnimate] = useState(false)
+  useEffect(() => {
+    if (want) {
+      setMounted(true)
+      setAnimate(true)
+      let second = 0
+      const first = requestAnimationFrame(() => { second = requestAnimationFrame(() => setExpanded(true)) })
+      return () => { cancelAnimationFrame(first); cancelAnimationFrame(second) }
+    }
+    setAnimate(true)
+    setExpanded(false)
+    const timer = setTimeout(() => setMounted(false), PANEL_MS)
+    return () => clearTimeout(timer)
+  }, [want])
+  if (!mounted) return null
+  return (
+    // The column itself slides its width (the main view reflows with it) and gives back the 8 px row gap when closed.
+    <div
+      className={cn("hidden shrink-0 overflow-hidden [--np-w:340px] xl:flex min-[1600px]:[--np-w:400px]", animate && "transition-[width,margin] duration-[280ms] ease-out motion-reduce:transition-none")}
+      style={{ width: expanded ? "var(--np-w)" : 0, marginLeft: expanded ? 0 : -8 }}
+    >
+      <div className={cn("h-full w-(--np-w) shrink-0", animate && "transition-[opacity,transform] duration-[280ms] ease-out motion-reduce:transition-none", expanded ? "translate-x-0 opacity-100" : "translate-x-4 opacity-0")}>
+        <PanelBody />
+      </div>
+    </div>
+  )
+}
+
+/** Panel open/close slide (ms). */
+const PANEL_MS = 280
+
+function PanelBody() {
+  const track = usePlayer((s) => s.queue[s.index])
   const lyricsOpen = usePlayer((s) => s.lyricsOpen)
   const tint = useNowPlayingTint()
-  const desktop = useMediaQuery("(min-width: 1280px)")
-  if (!desktop || !open || !track) return null
+  if (!track) return null
   return (
-    <aside aria-label="Sonando ahora" className="relative hidden w-[340px] min-w-0 shrink-0 overflow-hidden rounded-2xl bg-card xl:block min-[1600px]:w-[400px]">
+    <aside aria-label="Sonando ahora" className="relative h-full w-full min-w-0 overflow-hidden rounded-2xl bg-card">
       <ScrollArea className="relative h-full [&>[data-slot=scroll-area-viewport]>div]:block!">
         <div className="relative">
           <CoverGlow coverArt={track.coverArt} height="560px" />
@@ -53,9 +92,9 @@ export function NowPlayingPanel() {
             </Button>
           </div>
           <div className="relative flex flex-col gap-4 px-4 pt-2 pb-4">
-            <Cover coverArt={track.coverArt} alt={track.album} size={600} rounded="lg" className="w-full shadow-2xl shadow-black/40" />
+            <Cover key={`cover:${track.id}`} coverArt={track.coverArt} alt={track.album} size={600} rounded="lg" className="w-full shadow-2xl shadow-black/40" />
             <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0 flex-1">
+              <div key={`title:${track.id}`} className="min-w-0 flex-1 animate-fade-in motion-reduce:animate-none">
                 <h2 className="text-2xl leading-tight font-bold tracking-tight break-words">{track.title}</h2>
                 <ArtistLinks track={track} className="mt-1 block truncate text-[15px] text-muted-foreground" />
               </div>

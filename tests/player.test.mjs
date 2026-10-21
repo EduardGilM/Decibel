@@ -50,6 +50,36 @@ test("repeat cycles through the three modes", () => {
   }
 })
 
+test("Seguir escuchando restores fractional position and the saved playlist order, even with shuffle enabled", () => {
+  usePlayer.setState({ shuffle: true })
+  const original = [a, b, c]
+  const queue = [b, c, a]
+  const before = player().playbackId
+  player().playList(queue, 1, "playlist:guardada", { position: 7.625, original, shuffle: true, repeat: "all" })
+  assert.deepEqual(player().queue, queue)
+  assert.deepEqual(player().original, original)
+  assert.equal(player().index, 1)
+  assert.equal(player().current(), c)
+  assert.equal(player().position, 7.625)
+  assert.equal(player().duration, c.duration)
+  assert.equal(player().sourceLabel, "playlist:guardada")
+  assert.equal(player().repeat, "all")
+  assert.equal(player().isPlaying, true)
+  assert.equal(player().playbackId, before + 1)
+  player().playList(queue, 2, "playlist:guardada", { position: 9.875, original, shuffle: false, repeat: "off" })
+  assert.equal(player().position, 9.875, "resuming near the end must not round back a second")
+  assert.equal(player().shuffle, false)
+})
+
+test("resuming is routed as a playback start with its position, so the device can claim local audio first", () => {
+  const commands = []
+  configurePlaybackRouter((command) => { commands.push(command); return true })
+  const resume = { position: 7.625, original: tracks, shuffle: false, repeat: "off" }
+  player().playList(tracks, 1, "playlist:p", resume)
+  assert.deepEqual(commands, [{ action: "playList", args: [tracks, 1, "playlist:p", resume] }])
+  assert.deepEqual(player().queue, [])
+})
+
 test("YouTube continues even if an older session saved autoplay as disabled", async () => {
   storage.set("decibel-player", JSON.stringify({ state: { queue: [a], original: [a], index: 0, autoplay: false }, version: 0 }))
   await usePlayer.persist.rehydrate()

@@ -57,11 +57,11 @@ export function PasswordDialog({ open, onOpenChange, target, onSaved }: { open: 
           )}
           <div className="flex flex-col gap-2">
             <Label htmlFor="pw-next">Nueva contraseña</Label>
-            <Input id="pw-next" type="password" autoComplete="new-password" minLength={4} value={next} onChange={(e) => setNext(e.target.value)} required />
+            <Input id="pw-next" type="password" autoComplete="new-password" minLength={15} value={next} onChange={(e) => setNext(e.target.value)} required />
           </div>
           <div className="flex flex-col gap-2">
             <Label htmlFor="pw-repeat">Repítela</Label>
-            <Input id="pw-repeat" type="password" autoComplete="new-password" minLength={4} value={repeat} onChange={(e) => setRepeat(e.target.value)} required />
+            <Input id="pw-repeat" type="password" autoComplete="new-password" minLength={15} value={repeat} onChange={(e) => setRepeat(e.target.value)} required />
           </div>
           {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
           <DialogFooter className="border-t-0 bg-transparent">

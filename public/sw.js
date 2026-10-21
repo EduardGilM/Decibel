@@ -1,7 +1,7 @@
 // Minimal app-shell service worker. API calls are never cached; downloaded audio lives in its own
-// cache ("decibel-offline-v1"), written by the page and kept across versions.
-const CACHE = "decibel-v4"
-const KEEP = new Set([CACHE, "decibel-offline-v1"])
+// cache ("decibel-offline-v2"), written by the page and kept across versions.
+const CACHE = "decibel-v5"
+const KEEP = new Set([CACHE, "decibel-offline-v1", "decibel-offline-v2"])
 const SHELL = ["/", "/search/", "/library/", "/liked/", "/login/", "/downloads/", "/album/", "/playlist/", "/manifest.webmanifest", "/brand/decibel-mark-symmetric.png", "/brand/decibel-symmetric-icon-192.png"]
 
 self.addEventListener("install", (e) => {

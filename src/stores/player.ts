@@ -5,6 +5,7 @@ import { createJSONStorage, persist } from "zustand/middleware"
 import type { Track } from "@/lib/types"
 import { RECOMMENDATIONS_TIMEOUT_MS } from "../lib/audio/watchdog.ts"
 import { playbackActions, routePlayback } from "../lib/audio/device-protocol.ts"
+import { playbackPosition, type ResumeOptions } from "../lib/browse-history.ts"
 
 /** Pre-rename key ("decibel-x" -> "musica-x"); read once as fallback, removed on the next write. */
 const legacyKey = (key: string) => key.replace(/^decibel-/, "musica-")
@@ -41,7 +42,7 @@ interface PlayerState {
   fullOpen: boolean // mobile full screen player
   fullTab: PlayerTab
   current: () => Track | undefined
-  playList: (tracks: Track[], start?: number, label?: string) => void
+  playList: (tracks: Track[], start?: number, label?: string, resume?: ResumeOptions) => void
   playNext: (track: Track) => void
   addToQueue: (track: Track) => void
   jumpTo: (index: number) => void
@@ -122,17 +123,17 @@ export const usePlayer = create<PlayerState>()(
         fullTab: "now",
         current: () => get().queue[get().index],
 
-        playList: (tracks, start = 0, label) => {
+        playList: (tracks, start = 0, label, resume) => {
           if (!tracks[start]) return
           cancelRecommendations()
           const first = tracks[start]
           let queue = tracks
           let index = start
-          if (get().shuffle) {
+          if (!resume && get().shuffle) {
             queue = [first, ...shuffleArr(tracks.filter((_, i) => i !== start))]
             index = 0
           }
-          set({ queue, original: tracks, index, isPlaying: true, position: 0, sourceLabel: label, playbackId: get().playbackId + 1, recommendationError: null })
+          set({ queue, original: resume?.original ?? tracks, index, isPlaying: true, position: playbackPosition(resume?.position ?? 0, first.duration), duration: first.duration, sourceLabel: label, playbackId: get().playbackId + 1, recommendationError: null, ...(resume ? { shuffle: resume.shuffle, repeat: resume.repeat } : {}) })
         },
         playNext: (track) => {
           cancelRecommendations()

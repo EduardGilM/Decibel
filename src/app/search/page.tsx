@@ -3,13 +3,13 @@
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { SearchX } from "lucide-react"
-import { Suspense, useEffect, useMemo, useState, useSyncExternalStore } from "react"
+import { Suspense, useMemo, useSyncExternalStore } from "react"
 import { Card } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { FilterChips } from "@/components/music/filter-chips"
 import { ArtistAvatar, Cover } from "@/components/music/cover"
 import { AlbumCard, ArtistCard, hrefAlbum, hrefArtist } from "@/components/music/media-card"
-import { Grid, Shelf } from "@/components/music/shelf"
+import { Grid, GridSkeleton, Shelf, ShelfSkeleton } from "@/components/music/shelf"
 import { EmptyState, ErrorState } from "@/components/music/states"
 import { TopBar } from "@/components/music/top-bar"
 import { TrackList, TrackListSkeleton } from "@/components/music/track-list"
@@ -24,15 +24,6 @@ import { TopPodcasts } from "@/components/podcast/top-podcasts"
 import { usePodcastsEnabled } from "@/components/podcast/podcast-playback"
 
 const GENRE_COLORS = ["#1f6f5c", "#7a3b69", "#2b4c7e", "#a4502c", "#5b5f97", "#3d6b35", "#8c6d1f", "#6b2737", "#22577a", "#4a4e69"]
-
-function useDebounced<T>(value: T, ms = 250) {
-  const [v, setV] = useState(value)
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), ms)
-    return () => clearTimeout(t)
-  }, [value, ms])
-  return v
-}
 
 function Browse({ onPick }: { onPick: (g: string) => void }) {
   const { data, loading } = useData("genres", (p) => p.getGenres())
@@ -102,8 +93,8 @@ function SearchView() {
   const tab = requestedTab === "tracks" || requestedTab === "albums" || requestedTab === "artists" || (requestedTab === "podcasts" && podcastsEnabled) ? requestedTab : "all"
   const setTab = (type: SearchFilter | "podcasts") => router.replace(searchHref(q, type), { scroll: false })
   const searchType: SearchFilter = isYouTube && (tab === "tracks" || tab === "albums" || tab === "artists") ? tab : "all"
-  // Podcasts: the directory allows ~18 searches a minute, so wait a bit longer before asking.
-  const query = useDebounced(q.trim(), isYouTube || tab === "podcasts" ? 650 : 250)
+  // Only submitted searches reach the URL; the draft already has its debounce in TopSearch.
+  const query = q.trim()
   const { data, error, loading } = useData(query && tab !== "podcasts" ? `search:${searchType}:${query}` : null, (p) => p.search(query, undefined, searchType))
 
   const empty = data && (tab === "tracks" ? !data.tracks.length : tab === "albums" ? !data.albums.length : tab === "artists" ? !data.artists.length : !data.artists.length && !data.albums.length && !data.tracks.length)
@@ -148,7 +139,7 @@ function SearchView() {
         )}
         {query && tab === "podcasts" && <PodcastResults query={query} />}
         {error && <ErrorState error={error} />}
-        {query && loading && tab !== "podcasts" && <TrackListSkeleton />}
+        {query && loading && tab !== "podcasts" && (tab === "albums" || tab === "artists" ? <GridSkeleton round={tab === "artists"} /> : <div className="flex flex-col gap-6"><div className="px-2 md:px-4"><TrackListSkeleton rows={6} /></div>{tab === "all" && <ShelfSkeleton />}</div>)}
         {empty && (
           <EmptyState icon={SearchX} title={`Sin ${tab === "albums" ? "álbumes" : tab === "tracks" ? "canciones" : tab === "artists" ? "artistas" : "resultados"} para «${query}»`}>
             Revisa la ortografía o prueba con otras palabras.
